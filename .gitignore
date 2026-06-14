@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist-electron/
+out/
+*.log
+.env
+.env.local
+episodes_mp4/
+*.mp4
+*.mkv
+*.mov
+*.avi

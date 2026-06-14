@@ -1,0 +1,107 @@
+import { contextBridge, ipcRenderer } from 'electron'
+import { electronAPI } from '@electron-toolkit/preload'
+
+const api = {
+  // Episodes
+  getEpisodes: () => ipcRenderer.invoke('episodes:getAll'),
+  getEpisode: (id: number) => ipcRenderer.invoke('episodes:getById', id),
+  importEpisode: (filePath: string) => ipcRenderer.invoke('episodes:import', filePath),
+  deleteEpisode: (id: number) => ipcRenderer.invoke('episodes:delete', id),
+  updateEpisode: (id: number, data: Record<string, unknown>) =>
+    ipcRenderer.invoke('episodes:update', id, data),
+
+  // Transcripts
+  getTranscript: (episodeId: number) => ipcRenderer.invoke('transcripts:getByEpisode', episodeId),
+  startTranscription: (episodeId: number, startSeconds?: number, endSeconds?: number) =>
+    ipcRenderer.invoke('transcripts:start', episodeId, startSeconds ?? 0, endSeconds),
+  extractFrame: (filePath: string, timeSeconds: number) =>
+    ipcRenderer.invoke('media:extractFrame', filePath, timeSeconds),
+  getMediaDuration: (filePath: string) =>
+    ipcRenderer.invoke('media:getDuration', filePath),
+  updateTranscriptSegment: (id: number, text: string) =>
+    ipcRenderer.invoke('transcripts:updateSegment', id, text),
+  onImportProgress: (callback: (episodeId: number, status: string | null) => void) => {
+    const handler = (_: unknown, episodeId: number, status: string | null) => callback(episodeId, status)
+    ipcRenderer.on('episodes:importProgress', handler)
+    return () => ipcRenderer.removeListener('episodes:importProgress', handler)
+  },
+
+  onTranscriptionProgress: (callback: (progress: number, status: string) => void) => {
+    const handler = (_: unknown, progress: number, status: string) => callback(progress, status)
+    ipcRenderer.on('transcription:progress', handler)
+    return () => ipcRenderer.removeListener('transcription:progress', handler)
+  },
+
+  // AI Content
+  getGeneratedContent: (episodeId: number) =>
+    ipcRenderer.invoke('ai:getContent', episodeId),
+  generateContent: (episodeId: number, type: string, options?: Record<string, unknown>) =>
+    ipcRenderer.invoke('ai:generate', episodeId, type, options),
+  saveContent: (contentId: number, content: string) =>
+    ipcRenderer.invoke('ai:saveContent', contentId, content),
+  deleteContent: (contentId: number) => ipcRenderer.invoke('ai:deleteContent', contentId),
+  getDefaultBlogPrompt: () => ipcRenderer.invoke('ai:getDefaultBlogPrompt'),
+  getDefaultYoutubePrompt: () => ipcRenderer.invoke('ai:getDefaultYoutubePrompt'),
+  getDefaultInstagramPrompt: () => ipcRenderer.invoke('ai:getDefaultInstagramPrompt'),
+  onAIProgress: (callback: (status: string) => void) => {
+    const handler = (_: unknown, status: string) => callback(status)
+    ipcRenderer.on('ai:progress', handler)
+    return () => ipcRenderer.removeListener('ai:progress', handler)
+  },
+
+  // Clips
+  getClips: (episodeId: number) => ipcRenderer.invoke('clips:getByEpisode', episodeId),
+  createClip: (episodeId: number, startTime: number, endTime: number, title: string) =>
+    ipcRenderer.invoke('clips:create', episodeId, startTime, endTime, title),
+  exportClip: (clipId: number) => ipcRenderer.invoke('clips:export', clipId),
+  deleteClip: (clipId: number) => ipcRenderer.invoke('clips:delete', clipId),
+  onClipProgress: (callback: (progress: number) => void) => {
+    const handler = (_: unknown, progress: number) => callback(progress)
+    ipcRenderer.on('clips:progress', handler)
+    return () => ipcRenderer.removeListener('clips:progress', handler)
+  },
+
+  // File system
+  openFileDialog: (filters?: { name: string; extensions: string[] }[]) =>
+    ipcRenderer.invoke('files:openDialog', filters),
+  openSaveDialog: (defaultPath?: string) =>
+    ipcRenderer.invoke('files:saveDialog', defaultPath),
+  revealInFinder: (filePath: string) => ipcRenderer.invoke('files:reveal', filePath),
+  getAppDataPath: () => ipcRenderer.invoke('files:getAppDataPath'),
+  openExternal: (url: string) => ipcRenderer.invoke('files:openExternal', url),
+
+  // First run
+  checkSetupComplete: () => ipcRenderer.invoke('setup:isComplete'),
+  shouldShowSetup: () => ipcRenderer.invoke('setup:shouldShow'),
+  markSetupComplete: () => ipcRenderer.invoke('setup:markComplete'),
+
+  // Whisper setup
+  getWhisperStatus: () => ipcRenderer.invoke('whisper:getStatus'),
+  installWhisper: () => ipcRenderer.invoke('whisper:install'),
+  downloadWhisperModel: (model: string) => ipcRenderer.invoke('whisper:downloadModel', model),
+  getWhisperModelsDir: () => ipcRenderer.invoke('whisper:getModelsDir'),
+  onWhisperSetupStatus: (callback: (data: WhisperSetupStatus) => void) => {
+    const handler = (_: unknown, data: WhisperSetupStatus) => callback(data)
+    ipcRenderer.on('whisper:setup-status', handler)
+    return () => ipcRenderer.removeListener('whisper:setup-status', handler)
+  },
+
+  // Settings
+  getSetting: (key: string) => ipcRenderer.invoke('settings:get', key),
+  setSetting: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value),
+  getAllSettings: () => ipcRenderer.invoke('settings:getAll')
+}
+
+if (process.contextIsolated) {
+  try {
+    contextBridge.exposeInMainWorld('electron', electronAPI)
+    contextBridge.exposeInMainWorld('api', api)
+  } catch (error) {
+    console.error(error)
+  }
+} else {
+  // @ts-ignore
+  window.electron = electronAPI
+  // @ts-ignore
+  window.api = api
+}

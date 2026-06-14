@@ -1,0 +1,121 @@
+/// <reference types="vite/client" />
+
+interface WhisperModelInfo {
+  key: string
+  size: string
+  description: string
+  downloaded: boolean
+}
+
+interface WhisperStatus {
+  platform: string
+  brewInstalled: boolean
+  whisperInstalled: boolean
+  whisperBinaryPath: string
+  currentModel: string
+  modelDownloaded: boolean
+  modelPath: string
+  models: WhisperModelInfo[]
+}
+
+interface WhisperSetupStatus {
+  step: 'install' | 'download'
+  message: string
+  progress: number
+  model?: string
+}
+
+interface Window {
+  api: {
+    getEpisodes: () => Promise<Episode[]>
+    getEpisode: (id: number) => Promise<Episode>
+    importEpisode: (filePath: string) => Promise<Episode>
+    deleteEpisode: (id: number) => Promise<{ success: boolean }>
+    updateEpisode: (id: number, data: Partial<Episode>) => Promise<Episode>
+
+    getTranscript: (episodeId: number) => Promise<TranscriptSegment[]>
+    startTranscription: (episodeId: number, startSeconds?: number, endSeconds?: number) => Promise<{ success: boolean; segmentCount: number }>
+    extractFrame: (filePath: string, timeSeconds: number) => Promise<string | null>
+    getMediaDuration: (filePath: string) => Promise<number>
+    updateTranscriptSegment: (id: number, text: string) => Promise<{ success: boolean }>
+    onImportProgress: (cb: (episodeId: number, status: string | null) => void) => () => void
+    onTranscriptionProgress: (cb: (progress: number, status: string) => void) => () => void
+
+    getGeneratedContent: (episodeId: number) => Promise<GeneratedContent[]>
+    generateContent: (episodeId: number, type: string, options?: { provider?: 'claude' | 'openai' | 'gemini' }) => Promise<GeneratedContent>
+    saveContent: (contentId: number, content: string) => Promise<{ success: boolean }>
+    deleteContent: (contentId: number) => Promise<{ success: boolean }>
+    getDefaultBlogPrompt: () => Promise<string>
+    getDefaultYoutubePrompt: () => Promise<string>
+    getDefaultInstagramPrompt: () => Promise<string>
+    onAIProgress: (cb: (status: string) => void) => () => void
+
+    getClips: (episodeId: number) => Promise<Clip[]>
+    createClip: (episodeId: number, startTime: number, endTime: number, title: string) => Promise<Clip>
+    exportClip: (clipId: number) => Promise<{ success: boolean; filePath: string }>
+    deleteClip: (clipId: number) => Promise<{ success: boolean }>
+    onClipProgress: (cb: (progress: number) => void) => () => void
+
+    openFileDialog: (filters?: { name: string; extensions: string[] }[]) => Promise<string | null>
+    openSaveDialog: (defaultPath?: string) => Promise<string | null>
+    revealInFinder: (filePath: string) => Promise<{ success: boolean }>
+    getAppDataPath: () => Promise<string>
+    openExternal: (url: string) => Promise<{ success: boolean }>
+
+    checkSetupComplete: () => Promise<boolean>
+    shouldShowSetup: () => Promise<boolean>
+    markSetupComplete: () => Promise<{ success: boolean }>
+
+    getWhisperStatus: () => Promise<WhisperStatus>
+    installWhisper: () => Promise<{ success: boolean; binaryPath?: string; message?: string }>
+    downloadWhisperModel: (model: string) => Promise<{ success: boolean; modelPath?: string }>
+    getWhisperModelsDir: () => Promise<string>
+    onWhisperSetupStatus: (callback: (data: WhisperSetupStatus) => void) => () => void
+
+    getSetting: (key: string) => Promise<string | null>
+    setSetting: (key: string, value: unknown) => Promise<{ success: boolean }>
+    getAllSettings: () => Promise<Record<string, string>>
+  }
+}
+
+interface Episode {
+  id: number
+  title: string
+  file_path: string
+  audio_path: string
+  duration: number
+  status: 'imported' | 'transcribing' | 'transcribed' | 'ready'
+  created_at: string
+  updated_at: string
+  transcript_count?: number
+  clip_count?: number
+  content_count?: number
+}
+
+interface TranscriptSegment {
+  id: number
+  episode_id: number
+  start_time: number
+  end_time: number
+  text: string
+  speaker: string
+}
+
+interface GeneratedContent {
+  id: number
+  episode_id: number
+  type: string
+  content: string
+  metadata: string
+  created_at: string
+}
+
+interface Clip {
+  id: number
+  episode_id: number
+  start_time: number
+  end_time: number
+  title: string
+  reason: string
+  file_path: string
+}
