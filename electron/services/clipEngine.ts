@@ -49,6 +49,10 @@ export function registerClipHandlers(ipcMain: IpcMain): void {
 
     if (!clip) throw new Error('Clip not found')
 
+    if (!existsSync(clip.episode_path)) {
+      throw new Error(`Arquivo de origem não encontrado: ${clip.episode_path}`)
+    }
+
     const settingRow = db.prepare("SELECT value FROM settings WHERE key = 'output_directory'").get() as { value: string } | undefined
     const outputDir = settingRow?.value || join(app.getPath('documents'), 'Talkeando Studio', 'Clips')
     mkdirSync(outputDir, { recursive: true })
@@ -63,10 +67,12 @@ export function registerClipHandlers(ipcMain: IpcMain): void {
     return new Promise((resolve, reject) => {
       const duration = clip.end_time - clip.start_time
       let lastProgress = 0
+      let stderrBuf = ''
 
+      // -ss before -i = fast input seek to nearest keyframe (required for -c copy to work)
       const proc = spawn(ffmpeg, [
-        '-i', clip.episode_path,
         '-ss', secondsToTimestamp(clip.start_time),
+        '-i', clip.episode_path,
         '-t', String(duration),
         '-c', 'copy',
         '-y',
@@ -75,6 +81,7 @@ export function registerClipHandlers(ipcMain: IpcMain): void {
 
       proc.stderr.on('data', (data: Buffer) => {
         const line = data.toString()
+        stderrBuf += line
         const timeMatch = line.match(/time=(\d{2}:\d{2}:\d{2}\.\d{2})/)
         if (timeMatch) {
           const [h, m, s] = timeMatch[1].split(':').map(parseFloat)
@@ -89,7 +96,7 @@ export function registerClipHandlers(ipcMain: IpcMain): void {
 
       proc.on('close', (code) => {
         if (code !== 0) {
-          reject(new Error(`FFmpeg exited with code ${code}`))
+          reject(new Error(`FFmpeg encerrou com código ${code}.\n${stderrBuf.slice(-500)}`))
           return
         }
         db.prepare('UPDATE clips SET file_path = ? WHERE id = ?').run(outputPath, clipId)
@@ -105,5 +112,27 @@ export function registerClipHandlers(ipcMain: IpcMain): void {
     const db = getDatabase()
     db.prepare('DELETE FROM clips WHERE id = ?').run(clipId)
     return { success: true }
+  })
+
+  ipcMain.handle('clips:deleteAll', (_event, episodeId: number) => {
+    const db = getDatabase()
+    db.prepare('DELETE FROM clips WHERE episode_id = ?').run(episodeId)
+    return { success: true }
+  })
+
+  ipcMain.handle('clips:createFromKeyMoments', (_event, episodeId: number) => {
+    const db = getDatabase()
+    const moments = db.prepare(
+      'SELECT * FROM key_moments WHERE episode_id = ? ORDER BY start_time ASC'
+    ).all(episodeId) as { title: string; description: string; start_time: number; end_time: number }[]
+
+    if (moments.length === 0) throw new Error('Nenhum momento-chave encontrado. Gere o Resumo primeiro.')
+
+    const insert = db.prepare(
+      'INSERT INTO clips (episode_id, start_time, end_time, title) VALUES (?, ?, ?, ?)'
+    )
+    for (const m of moments) insert.run(episodeId, m.start_time, m.end_time, m.title)
+
+    return db.prepare('SELECT * FROM clips WHERE episode_id = ? ORDER BY start_time ASC').all(episodeId)
   })
 }

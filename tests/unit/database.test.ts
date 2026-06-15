@@ -48,7 +48,22 @@ describe('setupDatabase', () => {
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS transcripts')
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS generated_content')
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS clips')
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS key_moments')
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS settings')
+  })
+
+  it('key_moments table has the required columns', () => {
+    setupDatabase(':memory:')
+    const sql: string = getInstance().exec.mock.calls[0][0] as string
+    const start = sql.indexOf('CREATE TABLE IF NOT EXISTS key_moments')
+    const end   = sql.indexOf('CREATE TABLE IF NOT EXISTS settings')
+    const block = sql.slice(start, end)
+
+    expect(block).toContain('episode_id')
+    expect(block).toContain('title')
+    expect(block).toContain('description')
+    expect(block).toContain('start_time')
+    expect(block).toContain('end_time')
   })
 
   it('seeds default settings rows', () => {
@@ -59,6 +74,7 @@ describe('setupDatabase', () => {
     expect(sql).toContain("('whisper_model', 'base')")
     expect(sql).toContain("('default_language', 'auto')")
     expect(sql).toContain("('output_directory', '')")
+    expect(sql).toContain("('resume_prompt', '')")
   })
 })
 

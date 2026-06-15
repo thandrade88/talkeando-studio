@@ -127,6 +127,38 @@ function getTranscriptText(episodeId: number): string {
   return segments.map((s) => s.text).join(' ')
 }
 
+function getTranscriptSegmentsRaw(episodeId: number): { start_time: number; end_time: number; text: string }[] {
+  const db = getDatabase()
+  return db.prepare(
+    'SELECT start_time, end_time, text FROM transcripts WHERE episode_id = ? ORDER BY start_time ASC'
+  ).all(episodeId) as { start_time: number; end_time: number; text: string }[]
+}
+
+export const DEFAULT_RESUME_PROMPT = `Você é um editor especializado em podcasts brasileiros.
+
+Com base na transcrição abaixo do episódio "{{title}}", crie:
+
+1. Um RESUMO executivo do episódio em 3 a 5 parágrafos
+2. De 4 a 7 MOMENTOS-CHAVE — trechos de 30 a 120 segundos com insights valiosos, histórias marcantes ou citações impactantes
+
+Retorne APENAS um JSON válido (sem markdown, sem explicação):
+{
+  "summary": "texto do resumo em português...",
+  "keyMoments": [
+    {
+      "title": "Título descritivo e conciso",
+      "description": "O que torna este momento especial (1-2 frases)",
+      "start_time": 123,
+      "end_time": 245
+    }
+  ]
+}
+
+Os valores start_time e end_time são números em segundos exatamente como aparecem entre colchetes na transcrição abaixo.
+
+TRANSCRIÇÃO (formato [início-fim] texto):
+{{transcript}}`
+
 function getTranscriptWithTimestamps(episodeId: number): string {
   const db = getDatabase()
   const segments = db.prepare(
@@ -361,6 +393,78 @@ export function registerAIHandlers(ipcMain: IpcMain): void {
     return db.prepare('SELECT * FROM generated_content WHERE id = ?').get(row.lastInsertRowid)
   })
 
+  ipcMain.handle('ai:generateResume', async (event, episodeId: number, opts?: { provider?: AIProvider }) => {
+    const db = getDatabase()
+    const episode = db.prepare('SELECT * FROM episodes WHERE id = ?').get(episodeId) as { title: string } | undefined
+    if (!episode) throw new Error('Episode not found')
+
+    const segments = getTranscriptSegmentsRaw(episodeId)
+    if (segments.length === 0) throw new Error('No transcript found. Please transcribe the episode first.')
+
+    const provider: AIProvider = opts?.provider ?? (getSetting('ai_provider') as AIProvider) ?? 'claude'
+    const meta = PROVIDER_META[provider]
+
+    const win = BrowserWindow.fromWebContents(event.sender)
+    win?.webContents.send('ai:progress', `Gerando resumo com ${meta.name}...`)
+
+    // Sample one segment per minute to stay within provider token limits
+    const seen = new Set<number>()
+    const sampled = segments.filter(s => {
+      const minute = Math.floor(s.start_time / 60)
+      if (seen.has(minute)) return false
+      seen.add(minute); return true
+    })
+    const transcriptFormatted = sampled
+      .map(s => `[${Math.round(s.start_time)}-${Math.round(s.end_time)}] ${s.text}`)
+      .join('\n')
+
+    const customTemplate = getSetting('resume_prompt')
+    const template = customTemplate || DEFAULT_RESUME_PROMPT
+    const prompt = applyPromptTemplate(template, episode.title, transcriptFormatted)
+
+    const raw = await generateText(provider, prompt)
+
+    // Strip markdown fences the AI might add
+    const json = raw.replace(/```(?:json)?\s*/gi, '').replace(/```/g, '').trim()
+
+    let parsed: { summary: string; keyMoments: { title: string; description: string; start_time: number; end_time: number }[] }
+    try {
+      parsed = JSON.parse(json)
+    } catch {
+      throw new Error(`AI returned invalid JSON for resume.\n${raw.slice(0, 300)}`)
+    }
+
+    // Persist summary as generated_content
+    db.prepare('DELETE FROM generated_content WHERE episode_id = ? AND type = ?').run(episodeId, 'resume')
+    const contentRow = db.prepare(
+      'INSERT INTO generated_content (episode_id, type, content, metadata) VALUES (?, ?, ?, ?)'
+    ).run(episodeId, 'resume', parsed.summary ?? '', JSON.stringify({ provider, model: meta.model }))
+
+    // Persist key moments — replace previous ones for this episode
+    db.prepare('DELETE FROM key_moments WHERE episode_id = ?').run(episodeId)
+    const insertMoment = db.prepare(
+      'INSERT INTO key_moments (episode_id, title, description, start_time, end_time) VALUES (?, ?, ?, ?, ?)'
+    )
+    const validMoments: typeof parsed.keyMoments = []
+    for (const m of (parsed.keyMoments ?? [])) {
+      if (typeof m.start_time !== 'number' || typeof m.end_time !== 'number' || m.end_time <= m.start_time) continue
+      insertMoment.run(episodeId, m.title ?? '', m.description ?? '', m.start_time, m.end_time)
+      validMoments.push(m)
+    }
+
+    win?.webContents.send('ai:progress', 'Resumo gerado!')
+
+    return {
+      content: db.prepare('SELECT * FROM generated_content WHERE id = ?').get(contentRow.lastInsertRowid),
+      keyMoments: db.prepare('SELECT * FROM key_moments WHERE episode_id = ? ORDER BY start_time ASC').all(episodeId),
+    }
+  })
+
+  ipcMain.handle('ai:getKeyMoments', (_event, episodeId: number) => {
+    const db = getDatabase()
+    return db.prepare('SELECT * FROM key_moments WHERE episode_id = ? ORDER BY start_time ASC').all(episodeId)
+  })
+
   ipcMain.handle('ai:saveContent', (_event, contentId: number, content: string) => {
     const db = getDatabase()
     db.prepare('UPDATE generated_content SET content = ? WHERE id = ?').run(content, contentId)
@@ -376,4 +480,5 @@ export function registerAIHandlers(ipcMain: IpcMain): void {
   ipcMain.handle('ai:getDefaultBlogPrompt', () => DEFAULT_BLOG_POST_PROMPT)
   ipcMain.handle('ai:getDefaultYoutubePrompt', () => DEFAULT_YOUTUBE_PROMPT)
   ipcMain.handle('ai:getDefaultInstagramPrompt', () => DEFAULT_INSTAGRAM_PROMPT)
+  ipcMain.handle('ai:getDefaultResumePrompt', () => DEFAULT_RESUME_PROMPT)
 }

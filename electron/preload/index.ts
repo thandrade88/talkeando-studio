@@ -43,6 +43,10 @@ const api = {
   getDefaultBlogPrompt: () => ipcRenderer.invoke('ai:getDefaultBlogPrompt'),
   getDefaultYoutubePrompt: () => ipcRenderer.invoke('ai:getDefaultYoutubePrompt'),
   getDefaultInstagramPrompt: () => ipcRenderer.invoke('ai:getDefaultInstagramPrompt'),
+  getDefaultResumePrompt: () => ipcRenderer.invoke('ai:getDefaultResumePrompt'),
+  generateResume: (episodeId: number, options?: Record<string, unknown>) =>
+    ipcRenderer.invoke('ai:generateResume', episodeId, options),
+  getKeyMoments: (episodeId: number) => ipcRenderer.invoke('ai:getKeyMoments', episodeId),
   onAIProgress: (callback: (status: string) => void) => {
     const handler = (_: unknown, status: string) => callback(status)
     ipcRenderer.on('ai:progress', handler)
@@ -53,8 +57,11 @@ const api = {
   getClips: (episodeId: number) => ipcRenderer.invoke('clips:getByEpisode', episodeId),
   createClip: (episodeId: number, startTime: number, endTime: number, title: string) =>
     ipcRenderer.invoke('clips:create', episodeId, startTime, endTime, title),
+  createClipsFromKeyMoments: (episodeId: number) =>
+    ipcRenderer.invoke('clips:createFromKeyMoments', episodeId),
   exportClip: (clipId: number) => ipcRenderer.invoke('clips:export', clipId),
   deleteClip: (clipId: number) => ipcRenderer.invoke('clips:delete', clipId),
+  deleteAllClips: (episodeId: number) => ipcRenderer.invoke('clips:deleteAll', episodeId),
   onClipProgress: (callback: (progress: number) => void) => {
     const handler = (_: unknown, progress: number) => callback(progress)
     ipcRenderer.on('clips:progress', handler)

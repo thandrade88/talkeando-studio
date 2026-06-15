@@ -48,12 +48,17 @@ interface Window {
     getDefaultBlogPrompt: () => Promise<string>
     getDefaultYoutubePrompt: () => Promise<string>
     getDefaultInstagramPrompt: () => Promise<string>
+    getDefaultResumePrompt: () => Promise<string>
+    generateResume: (episodeId: number, options?: { provider?: 'claude' | 'openai' | 'gemini' }) => Promise<{ content: GeneratedContent; keyMoments: KeyMoment[] }>
+    getKeyMoments: (episodeId: number) => Promise<KeyMoment[]>
     onAIProgress: (cb: (status: string) => void) => () => void
 
     getClips: (episodeId: number) => Promise<Clip[]>
     createClip: (episodeId: number, startTime: number, endTime: number, title: string) => Promise<Clip>
+    createClipsFromKeyMoments: (episodeId: number) => Promise<Clip[]>
     exportClip: (clipId: number) => Promise<{ success: boolean; filePath: string }>
     deleteClip: (clipId: number) => Promise<{ success: boolean }>
+    deleteAllClips: (episodeId: number) => Promise<{ success: boolean }>
     onClipProgress: (cb: (progress: number) => void) => () => void
 
     openFileDialog: (filters?: { name: string; extensions: string[] }[]) => Promise<string | null>
@@ -107,6 +112,16 @@ interface GeneratedContent {
   type: string
   content: string
   metadata: string
+  created_at: string
+}
+
+interface KeyMoment {
+  id: number
+  episode_id: number
+  title: string
+  description: string
+  start_time: number
+  end_time: number
   created_at: string
 }
 

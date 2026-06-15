@@ -327,7 +327,8 @@ function TranscriptionTab({
 // ─── Conteúdo tab ─────────────────────────────────────────────────────────────
 
 const CONTENT_TYPES = [
-  { key: 'blog_post',  label: 'Blog Post' },
+  { key: 'resumo',    label: 'Resumo'    },
+  { key: 'blog_post', label: 'Blog Post' },
   { key: 'youtube',   label: 'YouTube'   },
   { key: 'instagram', label: 'Instagram' },
 ]
@@ -337,6 +338,165 @@ const AI_PROVIDERS = [
   { value: 'gemini', label: 'Gemini',  fullLabel: 'Gemini (Google)'    },
 ] as const
 type ProviderValue = 'claude' | 'openai' | 'gemini'
+
+function ResumoTab({ episodeId, provider }: { episodeId: number; provider: ProviderValue }) {
+  const [summary, setSummary]               = useState('')
+  const [contentRow, setContentRow]         = useState<GeneratedContent | null>(null)
+  const [keyMoments, setKeyMoments]         = useState<KeyMoment[]>([])
+  const [isGenerating, setIsGenerating]     = useState(false)
+  const [aiStatus, setAiStatus]             = useState('')
+  const [promptTemplate, setPromptTemplate] = useState('')
+  const [promptOpen, setPromptOpen]         = useState(false)
+  const [promptDirty, setPromptDirty]       = useState(false)
+  const [promptSaved, setPromptSaved]       = useState(false)
+  const defaultPromptRef                    = useRef<string>('')
+
+  useEffect(() => {
+    window.api.getGeneratedContent(episodeId).then(all => {
+      const row = all.find(c => c.type === 'resume') ?? null
+      setContentRow(row); setSummary(row?.content ?? '')
+    })
+    window.api.getKeyMoments(episodeId).then(setKeyMoments)
+    Promise.all([window.api.getSetting('resume_prompt'), window.api.getDefaultResumePrompt()])
+      .then(([saved, def]) => {
+        defaultPromptRef.current = def
+        setPromptTemplate(saved || def)
+        setPromptDirty(false)
+      })
+  }, [episodeId])
+
+  useEffect(() => window.api.onAIProgress(s => setAiStatus(s)), [])
+
+  async function generate() {
+    setIsGenerating(true); setAiStatus('')
+    try {
+      const r = await window.api.generateResume(episodeId, { provider })
+      setContentRow(r.content); setSummary(r.content.content)
+      setKeyMoments(r.keyMoments)
+    } catch (err) {
+      alert(`Erro ao gerar resumo:\n\n${err instanceof Error ? err.message : String(err)}`)
+    } finally { setIsGenerating(false) }
+  }
+
+  const providerLabel = AI_PROVIDERS.find(p => p.value === provider)?.label ?? 'IA'
+
+  return (
+    <div className="flex flex-col flex-1 overflow-hidden">
+      {/* prompt editor */}
+      <div className="border-b border-border shrink-0">
+        <button
+          onClick={() => setPromptOpen(v => !v)}
+          className="flex items-center gap-2 w-full px-6 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', promptOpen && 'rotate-180')} />
+          Prompt do Resumo
+          {promptDirty && <span className="ml-1 w-1.5 h-1.5 rounded-full bg-yellow-400" />}
+        </button>
+        {promptOpen && (
+          <div className="px-6 pb-3 space-y-2">
+            <p className="text-xs text-muted-foreground">
+              Use <code className="bg-secondary px-1 rounded">{'{{title}}'}</code> e <code className="bg-secondary px-1 rounded">{'{{transcript}}'}</code>.
+              O transcript inclui timestamps no formato <code className="bg-secondary px-1 rounded">[início-fim]</code>.
+            </p>
+            <textarea
+              value={promptTemplate} rows={8} spellCheck={false}
+              onChange={e => { setPromptTemplate(e.target.value); setPromptDirty(true); setPromptSaved(false) }}
+              className="w-full bg-secondary/40 border border-border rounded-lg px-3 py-2 text-xs font-mono resize-y focus:outline-none focus:border-primary/40"
+            />
+            <div className="flex items-center justify-between">
+              <button
+                onClick={() => { setPromptTemplate(defaultPromptRef.current); setPromptDirty(true) }}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <RotateCcw className="w-3 h-3" />Resetar
+              </button>
+              <button
+                onClick={async () => {
+                  await window.api.setSetting('resume_prompt', promptTemplate)
+                  setPromptDirty(false); setPromptSaved(true)
+                  setTimeout(() => setPromptSaved(false), 2000)
+                }}
+                disabled={!promptDirty}
+                className={cn(
+                  'flex items-center gap-1 text-xs px-3 py-1.5 rounded-md',
+                  promptSaved ? 'bg-primary/20 text-primary' : promptDirty ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground opacity-40'
+                )}
+              >
+                <Save className="w-3 h-3" />{promptSaved ? 'Salvo!' : 'Salvar prompt'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* action bar */}
+      <div className="flex items-center justify-between px-6 py-2 border-b border-border shrink-0">
+        <span className="text-xs text-muted-foreground">
+          {isGenerating
+            ? <span className="flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />{aiStatus || 'Gerando...'}</span>
+            : keyMoments.length > 0
+              ? `${keyMoments.length} momentos-chave identificados`
+              : 'Gere o resumo para identificar os momentos-chave do episódio'}
+        </span>
+        <button
+          onClick={generate}
+          disabled={isGenerating}
+          className="flex items-center gap-2 bg-primary hover:bg-primary/90 text-white text-sm px-4 py-1.5 rounded-md disabled:opacity-50"
+        >
+          {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+          {contentRow ? `Regenerar Resumo · ${providerLabel}` : `Gerar Resumo · ${providerLabel}`}
+        </button>
+      </div>
+
+      <div className="flex flex-1 overflow-hidden">
+        {/* left: summary text */}
+        <div className="flex flex-col w-80 shrink-0 border-r border-border overflow-hidden">
+          <p className="px-4 py-2 text-xs font-medium text-muted-foreground border-b border-border uppercase tracking-wider">Resumo</p>
+          <div className="flex-1 overflow-y-auto p-4">
+            {summary
+              ? <p className="text-sm leading-relaxed whitespace-pre-wrap">{summary}</p>
+              : <p className="text-xs text-muted-foreground text-center py-8 opacity-60">O resumo aparecerá aqui após a geração.</p>
+            }
+          </div>
+        </div>
+
+        {/* right: key moments */}
+        <div className="flex flex-col flex-1 overflow-hidden">
+          <p className="px-4 py-2 text-xs font-medium text-muted-foreground border-b border-border uppercase tracking-wider">Momentos-chave</p>
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {keyMoments.length === 0 && (
+              <p className="text-xs text-muted-foreground text-center py-8 opacity-60">
+                Os momentos-chave aparecem aqui após gerar o resumo.<br />Eles são usados para criar os clipes automaticamente.
+              </p>
+            )}
+            {keyMoments.map((m, i) => (
+              <div key={m.id} className="bg-card border border-border rounded-lg p-4 space-y-2">
+                <div className="flex items-start gap-3">
+                  <span className="shrink-0 w-6 h-6 rounded-full bg-primary/15 text-primary text-xs font-bold flex items-center justify-center mt-0.5">
+                    {i + 1}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold">{m.title}</p>
+                    {m.description && <p className="text-xs text-muted-foreground mt-1">{m.description}</p>}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 pl-9">
+                  <span className="inline-flex items-center gap-1 text-xs font-mono bg-secondary px-2 py-0.5 rounded text-muted-foreground">
+                    <Clock className="w-3 h-3" />
+                    {formatTimestamp(m.start_time)} → {formatTimestamp(m.end_time)}
+                  </span>
+                  <span className="text-xs text-muted-foreground opacity-60">
+                    {formatDuration(m.end_time - m.start_time)}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function ContentTab({ episodeId }: { episodeId: number }) {
   const navigate = useNavigate()
@@ -452,6 +612,9 @@ function ContentTab({ episodeId }: { episodeId: number }) {
 
       </div>
 
+      {/* resumo tab — self-contained, replaces the shared action bar + textarea */}
+      {contentType === 'resumo' && <ResumoTab episodeId={episodeId} provider={provider} />}
+
       {/* blog prompt editor */}
       {contentType === 'blog_post' && (
         <div className="border-b border-border shrink-0">
@@ -554,8 +717,8 @@ function ContentTab({ episodeId }: { episodeId: number }) {
         </div>
       )}
 
-      {/* per-tab action toolbar — sits between prompt editor and content */}
-      <div className="flex items-center justify-between px-6 py-2 border-b border-border shrink-0">
+      {/* per-tab action toolbar + content area — only for non-resumo tabs */}
+      {contentType !== 'resumo' && <div className="flex items-center justify-between px-6 py-2 border-b border-border shrink-0">
         <div className="flex items-center gap-2">
           {isGenerating ? (
             <span className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -626,25 +789,26 @@ function ContentTab({ episodeId }: { episodeId: number }) {
             </div>
           </div>
         </div>
-      </div>
+      </div>}
 
-      {/* content area */}
-      <div className="flex-1 overflow-hidden flex flex-col px-6 py-4">
-        {!activeContent && !isGenerating && (
-          <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
-            <Sparkles className="w-10 h-10 opacity-20" />
-            <p className="text-sm">Nenhum conteúdo para {CONTENT_TYPES.find(t => t.key === contentType)?.label} ainda.</p>
-            <p className="text-xs opacity-60">Use o botão acima para gerar.</p>
-          </div>
-        )}
-        {(activeContent || isGenerating) && (
-          <textarea
-            value={editContent} onChange={e => { setEditContent(e.target.value); setIsDirty(true) }}
-            className="flex-1 bg-secondary/50 border border-border rounded-lg px-4 py-3 text-sm font-mono leading-relaxed resize-none focus:outline-none focus:border-primary/40"
-            placeholder="Conteúdo gerado aparecerá aqui..."
-          />
-        )}
-      </div>
+      {contentType !== 'resumo' && (
+        <div className="flex-1 overflow-hidden flex flex-col px-6 py-4">
+          {!activeContent && !isGenerating && (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
+              <Sparkles className="w-10 h-10 opacity-20" />
+              <p className="text-sm">Nenhum conteúdo para {CONTENT_TYPES.find(t => t.key === contentType)?.label} ainda.</p>
+              <p className="text-xs opacity-60">Use o botão acima para gerar.</p>
+            </div>
+          )}
+          {(activeContent || isGenerating) && (
+            <textarea
+              value={editContent} onChange={e => { setEditContent(e.target.value); setIsDirty(true) }}
+              className="flex-1 bg-secondary/50 border border-border rounded-lg px-4 py-3 text-sm font-mono leading-relaxed resize-none focus:outline-none focus:border-primary/40"
+              placeholder="Conteúdo gerado aparecerá aqui..."
+            />
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -659,11 +823,28 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
   const [endTime, setEndTime]             = useState(30)
   const [isExporting, setIsExporting]     = useState(false)
   const [exportProgress, setExportProgress] = useState(0)
+  const [isImporting, setIsImporting]     = useState(false)
+  const [importMsg, setImportMsg]         = useState<string | null>(null)
 
   const selected = clips.find(c => c.id === selectedId)
 
   useEffect(() => { window.api.getClips(episodeId).then(setClips) }, [episodeId])
   useEffect(() => window.api.onClipProgress(p => setExportProgress(p)), [])
+
+  async function importFromResume() {
+    setIsImporting(true); setImportMsg(null)
+    try {
+      const updated = await window.api.createClipsFromKeyMoments(episodeId)
+      setClips(updated)
+      setImportMsg(`${updated.length} clipe(s) criado(s) do Resumo`)
+      setTimeout(() => setImportMsg(null), 4000)
+    } catch (err) {
+      setImportMsg(err instanceof Error ? err.message : String(err))
+      setTimeout(() => setImportMsg(null), 6000)
+    } finally {
+      setIsImporting(false)
+    }
+  }
 
   async function createClip() {
     if (!newTitle.trim()) return
@@ -694,8 +875,33 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
     <div className="flex flex-1 overflow-hidden">
       {/* clip list */}
       <aside className="w-60 border-r border-border flex flex-col shrink-0 overflow-hidden">
-        <div className="px-4 py-3 border-b border-border shrink-0">
-          <p className="text-sm font-medium text-muted-foreground">{clips.length} clipe(s)</p>
+        <div className="px-3 py-3 border-b border-border shrink-0 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium text-muted-foreground">{clips.length} clipe(s)</p>
+            {clips.length > 0 && (
+              <button
+                onClick={async () => {
+                  if (!confirm('Remover todos os clipes?')) return
+                  await window.api.deleteAllClips(episodeId)
+                  setClips([]); setSelectedId(null)
+                }}
+                className="text-xs text-muted-foreground hover:text-destructive"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+          <button
+            onClick={importFromResume}
+            disabled={isImporting}
+            className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs bg-secondary hover:bg-secondary/80 border border-border rounded disabled:opacity-50"
+          >
+            {isImporting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+            {isImporting ? 'Importando...' : 'Criar clipes do Resumo'}
+          </button>
+          {importMsg && (
+            <p className="text-xs text-center text-primary">{importMsg}</p>
+          )}
         </div>
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {clips.length === 0 && (

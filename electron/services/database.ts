@@ -66,6 +66,16 @@ export function setupDatabase(dbPathOverride?: string): void {
       file_path TEXT DEFAULT ''
     );
 
+    CREATE TABLE IF NOT EXISTS key_moments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      episode_id INTEGER NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      start_time REAL NOT NULL,
+      end_time REAL NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -77,6 +87,7 @@ export function setupDatabase(dbPathOverride?: string): void {
       ('gemini_api_key', ''),
       ('ai_provider', 'claude'),
       ('blog_post_prompt', ''),
+      ('resume_prompt', ''),
       ('whisper_model', 'base'),
       ('default_language', 'auto'),
       ('output_directory', ''),
