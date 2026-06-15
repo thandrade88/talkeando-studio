@@ -101,7 +101,7 @@ function applyPromptTemplate(template: string, title: string, transcript: string
 export const PROVIDER_META: Record<AIProvider, { name: string; model: string; keySettingKey: string }> = {
   claude: { name: 'Claude (Anthropic)',  model: 'claude-sonnet-4-6',  keySettingKey: 'anthropic_api_key' },
   openai: { name: 'ChatGPT (OpenAI)',   model: 'gpt-4o',             keySettingKey: 'openai_api_key' },
-  gemini: { name: 'Gemini (Google)',    model: 'gemini-2.0-flash',   keySettingKey: 'gemini_api_key' },
+  gemini: { name: 'Gemini (Google)',    model: 'gemini-2.5-flash',   keySettingKey: 'gemini_api_key' },
 }
 
 function getSetting(key: string): string {
