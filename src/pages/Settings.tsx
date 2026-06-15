@@ -34,21 +34,23 @@ const LANGUAGES = [
 
 const PROMPT_CONFIGS = [
   {
+    key: 'resume_prompt' as const,
+    label: 'Resumo',
+    hint: 'Gerado na aba Conteúdo → Resumo. O {{transcript}} inclui timestamps [início-fim] em segundos. O JSON de saída deve conter "summary" e "keyMoments".',
+  },
+  {
     key: 'blog_post_prompt' as const,
     label: 'Blog Post',
-    defaultKey: 'blog_post' as const,
     hint: 'Gerado na aba Conteúdo → Blog Post',
   },
   {
     key: 'youtube_prompt' as const,
     label: 'YouTube',
-    defaultKey: 'youtube' as const,
     hint: 'Gerado na aba Conteúdo → YouTube. O {{transcript}} inclui timestamps reais [MM:SS].',
   },
   {
     key: 'instagram_prompt' as const,
     label: 'Instagram',
-    defaultKey: 'instagram' as const,
     hint: 'Gerado na aba Conteúdo → Instagram',
   },
 ] as const
@@ -80,11 +82,13 @@ export default function Settings() {
     window.api.getAllSettings().then(setSettings)
     loadWhisperStatus()
     Promise.all([
+      window.api.getDefaultResumePrompt(),
       window.api.getDefaultBlogPrompt(),
       window.api.getDefaultYoutubePrompt(),
       window.api.getDefaultInstagramPrompt(),
-    ]).then(([blog, youtube, instagram]) => {
+    ]).then(([resume, blog, youtube, instagram]) => {
       defaultPromptsRef.current = {
+        resume_prompt: resume,
         blog_post_prompt: blog,
         youtube_prompt: youtube,
         instagram_prompt: instagram,
@@ -406,7 +410,7 @@ export default function Settings() {
               <code className="bg-secondary px-1 rounded">{'{{transcript}}'}</code> como variáveis.
               Alterações aqui valem como padrão global para todos os episódios.
             </p>
-            <div className="grid grid-cols-3 gap-5">
+            <div className="grid grid-cols-2 gap-5">
               {PROMPT_CONFIGS.map(({ key, label, hint }) => (
                 <div key={key} className="space-y-2">
                   <div className="flex items-center justify-between">
