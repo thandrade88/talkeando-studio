@@ -94,6 +94,7 @@ interface Window {
     connectYouTube: () => Promise<{ success: boolean; channels: YouTubeChannel[] }>
     disconnectYouTube: () => Promise<{ success: boolean }>
     listYouTubeChannels: () => Promise<YouTubeChannel[]>
+    resolveYouTubeChannel: (channelId: string) => Promise<YouTubeChannel>
     saveYouTubeChannelConfig: (mainChannelId: string, cutsChannelId: string) => Promise<{ success: boolean }>
     uploadToYouTube: (opts: { filePath: string; title: string; description: string; channelId: string; tags?: string[]; privacyStatus?: 'public' | 'unlisted' | 'private' }) => Promise<{ videoId: string; videoUrl: string }>
     updateYouTubeVideoMetadata: (opts: { videoId: string; title: string; description: string; tags?: string[] }) => Promise<{ success: boolean; videoUrl: string }>

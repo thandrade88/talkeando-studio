@@ -118,6 +118,7 @@ const api = {
   connectYouTube: () => ipcRenderer.invoke('youtube:connect'),
   disconnectYouTube: () => ipcRenderer.invoke('youtube:disconnect'),
   listYouTubeChannels: () => ipcRenderer.invoke('youtube:listChannels'),
+  resolveYouTubeChannel: (channelId: string) => ipcRenderer.invoke('youtube:resolveChannel', channelId),
   saveYouTubeChannelConfig: (mainChannelId: string, cutsChannelId: string) =>
     ipcRenderer.invoke('youtube:saveChannelConfig', mainChannelId, cutsChannelId),
   uploadToYouTube: (opts: {

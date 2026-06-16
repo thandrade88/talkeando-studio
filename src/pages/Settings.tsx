@@ -89,6 +89,9 @@ export default function Settings() {
   const [ytConnecting, setYtConnecting]     = useState(false)
   const [ytSavedChannels, setYtSavedChannels] = useState(false)
   const [ytError, setYtError]               = useState<string | null>(null)
+  const [ytExtraId, setYtExtraId]           = useState('')
+  const [ytExtraLoading, setYtExtraLoading] = useState(false)
+  const [ytExtraError, setYtExtraError]     = useState<string | null>(null)
 
   const defaultPromptsRef = useRef<Record<string, string>>({})
 
@@ -192,6 +195,20 @@ export default function Settings() {
     await window.api.saveYouTubeChannelConfig(ytMainChannel, ytCutsChannel)
     setYtSavedChannels(true)
     setTimeout(() => setYtSavedChannels(false), 2000)
+  }
+
+  async function addChannelById() {
+    if (!ytExtraId.trim()) return
+    setYtExtraLoading(true); setYtExtraError(null)
+    try {
+      const ch = await window.api.resolveYouTubeChannel(ytExtraId.trim())
+      setYtChannels(prev => prev.some(c => c.id === ch.id) ? prev : [...prev, ch])
+      setYtExtraId('')
+    } catch (err) {
+      setYtExtraError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setYtExtraLoading(false)
+    }
   }
 
   return (
@@ -377,28 +394,55 @@ export default function Settings() {
                 {ytError && <p className="text-xs text-destructive">{ytError}</p>}
               </div>
 
-              {/* Step 2: channel config (only if connected and channels loaded) */}
-              {ytConnected && ytChannels.length > 0 && (
+              {/* Step 2: channel config — shown whenever connected */}
+              {ytConnected && (
                 <div className="space-y-3 pt-2 border-t border-border">
                   <p className="text-xs text-muted-foreground">Escolha qual canal recebe cada tipo de conteúdo.</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-xs text-muted-foreground mb-1.5 block">Canal principal (episódios)</label>
-                      <select value={ytMainChannel} onChange={e => setYtMainChannel(e.target.value)}
-                        className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary/40">
-                        <option value="">Selecionar canal…</option>
-                        {ytChannels.map(ch => <option key={ch.id} value={ch.id}>{ch.title}</option>)}
-                      </select>
+
+                  {/* Manual channel-by-ID input (brand accounts often don't appear in the list) */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs text-muted-foreground">Adicionar canal por ID (se não aparecer na lista)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text" value={ytExtraId} onChange={e => setYtExtraId(e.target.value)}
+                        placeholder="UCxxxxxxxxxxxxxxxxxxxxx ou URL do canal"
+                        className="flex-1 bg-secondary border border-border rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-primary/40 placeholder:text-muted-foreground/40"
+                        onKeyDown={e => { if (e.key === 'Enter') addChannelById() }}
+                      />
+                      <button onClick={addChannelById} disabled={ytExtraLoading || !ytExtraId.trim()}
+                        className="flex items-center gap-1.5 text-xs px-3 py-2 bg-secondary hover:bg-secondary/80 border border-border rounded-lg disabled:opacity-50 shrink-0">
+                        {ytExtraLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Link className="w-3 h-3" />}
+                        Adicionar
+                      </button>
                     </div>
-                    <div>
-                      <label className="text-xs text-muted-foreground mb-1.5 block">Canal de cortes (clipes)</label>
-                      <select value={ytCutsChannel} onChange={e => setYtCutsChannel(e.target.value)}
-                        className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary/40">
-                        <option value="">Selecionar canal…</option>
-                        {ytChannels.map(ch => <option key={ch.id} value={ch.id}>{ch.title}</option>)}
-                      </select>
-                    </div>
+                    {ytExtraError && <p className="text-xs text-destructive">{ytExtraError}</p>}
                   </div>
+
+                  {ytChannels.length === 0 ? (
+                    <p className="text-xs text-muted-foreground/60 text-center py-1">
+                      Nenhum canal encontrado automaticamente. Cole o ID do canal acima.
+                    </p>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs text-muted-foreground mb-1.5 block">Canal principal (episódios)</label>
+                        <select value={ytMainChannel} onChange={e => setYtMainChannel(e.target.value)}
+                          className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary/40">
+                          <option value="">Selecionar canal…</option>
+                          {ytChannels.map(ch => <option key={ch.id} value={ch.id}>{ch.title}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground mb-1.5 block">Canal de cortes (clipes)</label>
+                        <select value={ytCutsChannel} onChange={e => setYtCutsChannel(e.target.value)}
+                          className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary/40">
+                          <option value="">Selecionar canal…</option>
+                          {ytChannels.map(ch => <option key={ch.id} value={ch.id}>{ch.title}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  )}
+
                   <button onClick={saveChannelConfig} disabled={!ytMainChannel || !ytCutsChannel}
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-secondary hover:bg-secondary/80 border border-border rounded-lg disabled:opacity-50">
                     {ytSavedChannels ? <Check className="w-3 h-3 text-primary" /> : <Check className="w-3 h-3" />}
