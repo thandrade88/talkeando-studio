@@ -124,6 +124,9 @@ const api = {
     filePath: string; title: string; description: string; channelId: string;
     tags?: string[]; privacyStatus?: 'public' | 'unlisted' | 'private'
   }) => ipcRenderer.invoke('youtube:uploadVideo', opts),
+  updateYouTubeVideoMetadata: (opts: {
+    videoId: string; title: string; description: string; tags?: string[]
+  }) => ipcRenderer.invoke('youtube:updateVideoMetadata', opts),
   onYouTubeUploadProgress: (cb: (pct: number) => void) => {
     const handler = (_: unknown, pct: number) => cb(pct)
     ipcRenderer.on('youtube:uploadProgress', handler)

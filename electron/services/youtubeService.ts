@@ -82,8 +82,8 @@ async function runOAuthFlow(
         access_type: 'offline',
         prompt:      'consent',
         scope: [
+          'https://www.googleapis.com/auth/youtube',
           'https://www.googleapis.com/auth/youtube.upload',
-          'https://www.googleapis.com/auth/youtube.readonly',
         ],
       })
 
@@ -222,5 +222,36 @@ export function registerYouTubeHandlers(ipcMain: IpcMain): void {
       videoId:  res.data.id,
       videoUrl: `https://youtu.be/${res.data.id}`,
     }
+  })
+
+  ipcMain.handle('youtube:updateVideoMetadata', async (_event, opts: {
+    videoId: string
+    title: string
+    description: string
+    tags?: string[]
+  }) => {
+    const client = buildOAuth2Client()
+    if (!loadTokens(client)) throw new Error('Não autenticado no YouTube.')
+    const yt = google.youtube({ version: 'v3', auth: client })
+
+    // videos.update requires the full snippet — first fetch the existing one
+    const existing = await yt.videos.list({ part: ['snippet'], id: [opts.videoId] })
+    const snippet  = existing.data.items?.[0]?.snippet
+    if (!snippet) throw new Error(`Vídeo não encontrado: ${opts.videoId}`)
+
+    await yt.videos.update({
+      part: ['snippet'],
+      requestBody: {
+        id: opts.videoId,
+        snippet: {
+          ...snippet,
+          title:       opts.title,
+          description: opts.description,
+          tags:        opts.tags ?? snippet.tags ?? [],
+        },
+      },
+    })
+
+    return { success: true, videoUrl: `https://youtu.be/${opts.videoId}` }
   })
 }
