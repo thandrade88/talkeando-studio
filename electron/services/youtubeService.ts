@@ -52,32 +52,51 @@ async function runOAuthFlow(
   win: BrowserWindow
 ): Promise<{ access_token: string; refresh_token: string; expiry_date: number }> {
   return new Promise((resolve, reject) => {
-    // Spin up a one-shot local HTTP server to receive the redirect
+    // Capture the port once the server is bound; must happen before server.close()
+    // which makes server.address() return null.
+    let listenPort: number | null = null
+    let settled = false
+
+    const done = (fn: () => void) => {
+      if (settled) return
+      settled = true
+      server.close()
+      fn()
+    }
+
     const server = createServer(async (req, res) => {
-      const url  = new URL(req.url!, `http://127.0.0.1`)
+      const url  = new URL(req.url ?? '/', `http://127.0.0.1`)
       const code = url.searchParams.get('code')
       const err  = url.searchParams.get('error')
 
+      // Ignore browser noise (favicon, prefetch, etc.)
+      if (!code && !err) { res.writeHead(204).end(); return }
+
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
       res.end('<html><body><h2 style="font-family:sans-serif">Autorizado! Pode fechar esta janela.</h2></body></html>')
-      server.close()
 
-      if (err || !code) { reject(new Error(err ?? 'Código de autorização não recebido.')); return }
+      if (err || !code) {
+        done(() => reject(new Error(err ?? 'Código de autorização não recebido.')))
+        return
+      }
 
-      const tempClient = new google.auth.OAuth2(clientId, clientSecret, `http://127.0.0.1:${(server.address() as { port: number }).port}`)
+      const redirectUri = `http://127.0.0.1:${listenPort}`
+      const tempClient  = new google.auth.OAuth2(clientId, clientSecret, redirectUri)
       try {
         const { tokens } = await tempClient.getToken(code)
-        resolve({
+        done(() => resolve({
           access_token:  tokens.access_token!,
           refresh_token: tokens.refresh_token!,
           expiry_date:   tokens.expiry_date ?? Date.now() + 3600_000,
-        })
-      } catch (e) { reject(e) }
+        }))
+      } catch (e) {
+        done(() => reject(e))
+      }
     })
 
     server.listen(0, '127.0.0.1', () => {
-      const port = (server.address() as { port: number }).port
-      const client = new google.auth.OAuth2(clientId, clientSecret, `http://127.0.0.1:${port}`)
+      listenPort = (server.address() as { port: number }).port
+      const client  = new google.auth.OAuth2(clientId, clientSecret, `http://127.0.0.1:${listenPort}`)
       const authUrl = client.generateAuthUrl({
         access_type: 'offline',
         prompt:      'consent',
@@ -86,15 +105,12 @@ async function runOAuthFlow(
           'https://www.googleapis.com/auth/youtube.upload',
         ],
       })
-
-      // Open auth URL in system browser (less invasive than a new BrowserWindow)
       shell.openExternal(authUrl)
       win.webContents.send('youtube:authStarted', authUrl)
     })
 
-    server.on('error', reject)
-    // Auto-cancel after 5 minutes
-    setTimeout(() => { server.close(); reject(new Error('OAuth timeout.')) }, 300_000)
+    server.on('error', err => done(() => reject(err)))
+    setTimeout(() => done(() => reject(new Error('OAuth timeout.'))), 300_000)
   })
 }
 
