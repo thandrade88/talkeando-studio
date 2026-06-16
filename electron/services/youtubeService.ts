@@ -1,4 +1,5 @@
-import { IpcMain, BrowserWindow } from 'electron'
+import { IpcMain, BrowserWindow, shell } from 'electron'
+import { createServer } from 'http'
 import { google } from 'googleapis'
 import { createReadStream, statSync } from 'fs'
 import { getDatabase } from './database'
@@ -18,15 +19,11 @@ function setSetting(key: string, value: string): void {
   ).run(key, value)
 }
 
-// Desktop-app redirect URI — registered in Google Cloud Console as "http://127.0.0.1".
-// Port is intentionally omitted; Google allows any port on loopback for Desktop app clients.
-const REDIRECT_URI = 'http://127.0.0.1'
-
-function buildOAuth2Client() {
+function buildOAuth2Client(redirectUri?: string) {
   const clientId     = getSetting('youtube_client_id')
   const clientSecret = getSetting('youtube_client_secret')
   if (!clientId || !clientSecret) throw new Error('Credenciais do YouTube não configuradas.')
-  return new google.auth.OAuth2(clientId, clientSecret, REDIRECT_URI)
+  return new google.auth.OAuth2(clientId, clientSecret, redirectUri ?? '')
 }
 
 function loadTokens(client: InstanceType<typeof google.auth.OAuth2>) {
@@ -47,10 +44,17 @@ function loadTokens(client: InstanceType<typeof google.auth.OAuth2>) {
   return !!access && !!refresh
 }
 
-// ─── OAuth flow (Electron BrowserWindow) ────────────────────────────────────
-// Opens a modal BrowserWindow so Google's consent page renders inside the app.
-// We intercept the redirect to http://127.0.0.1 via `will-redirect` BEFORE
-// Chromium tries to load it — no local HTTP server required.
+// ─── OAuth flow (system browser + loopback HTTP server) ─────────────────────
+// Opens Google's consent page in the user's default browser (shell.openExternal)
+// so passkeys, saved passwords, and existing sessions all work normally.
+// A one-shot local HTTP server captures the redirect code.
+//
+// Key implementation notes:
+//  - `listenPort` is captured inside server.listen() BEFORE the server can ever
+//    be closed, so server.address() is never called after close (which returns null).
+//  - `settled` flag ensures the promise resolves/rejects exactly once even if the
+//    browser fires extra requests (favicon, prefetch, etc.).
+//  - Requests without `code` or `error` get a 204 and are ignored.
 
 async function runOAuthFlow(
   clientId: string,
@@ -58,77 +62,80 @@ async function runOAuthFlow(
   mainWin: BrowserWindow
 ): Promise<{ access_token: string; refresh_token: string; expiry_date: number }> {
   return new Promise((resolve, reject) => {
-    const client  = new google.auth.OAuth2(clientId, clientSecret, REDIRECT_URI)
-    const authUrl = client.generateAuthUrl({
-      access_type: 'offline',
-      prompt:      'consent',
-      scope: [
-        'https://www.googleapis.com/auth/youtube',
-        'https://www.googleapis.com/auth/youtube.upload',
-      ],
-    })
+    let listenPort  = 0
+    let settled     = false
 
-    const authWin = new BrowserWindow({
-      width:           860,
-      height:          680,
-      parent:          mainWin,
-      modal:           true,
-      title:           'Conectar ao YouTube',
-      autoHideMenuBar: true,
-      webPreferences:  { nodeIntegration: false, contextIsolation: true, sandbox: true },
-    })
+    const timer = setTimeout(() => settle(() => reject(new Error('OAuth timeout.'))), 300_000)
 
-    let settled = false
-
-    function finish(fn: () => void) {
+    function settle(fn: () => void) {
       if (settled) return
       settled = true
-      if (!authWin.isDestroyed()) authWin.destroy()
+      clearTimeout(timer)
+      try { server.close() } catch { /* already closed */ }
       fn()
     }
 
-    async function handleCallback(url: string) {
-      if (!url.startsWith(REDIRECT_URI)) return
-      const parsed = new URL(url)
-      const code   = parsed.searchParams.get('code')
-      const error  = parsed.searchParams.get('error')
+    const server = createServer(async (req, res) => {
+      // Already resolved — ignore any late-arriving browser requests
+      if (settled) { res.writeHead(204).end(); return }
+
+      let code: string | null = null
+      let error: string | null = null
+      try {
+        const parsed = new URL(req.url ?? '/', `http://127.0.0.1:${listenPort}`)
+        code  = parsed.searchParams.get('code')
+        error = parsed.searchParams.get('error')
+      } catch {
+        res.writeHead(400).end(); return
+      }
+
+      // Ignore noise (favicon, browser pre-connect, etc.)
+      if (!code && !error) { res.writeHead(204).end(); return }
+
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+      res.end(`<html lang="pt-BR"><body style="font-family:sans-serif;text-align:center;padding:60px;background:#111;color:#eee">
+        <h2 style="color:${code ? '#4ade80' : '#f87171'}">${code ? '✓ Autorizado!' : '✗ Erro'}</h2>
+        <p style="color:#aaa">${code ? 'Pode fechar esta janela e voltar ao Talkeando Studio.' : `Erro: ${error}`}</p>
+      </body></html>`)
 
       if (error || !code) {
-        finish(() => reject(new Error(error ?? 'Autorização negada ou cancelada.')))
+        settle(() => reject(new Error(error ?? 'Autorização negada.')))
         return
       }
 
+      const redirectUri  = `http://127.0.0.1:${listenPort}`
+      const tempClient   = new google.auth.OAuth2(clientId, clientSecret, redirectUri)
       try {
-        const { tokens } = await client.getToken(code)
-        finish(() => resolve({
+        const { tokens } = await tempClient.getToken(code)
+        settle(() => resolve({
           access_token:  tokens.access_token!,
           refresh_token: tokens.refresh_token!,
           expiry_date:   tokens.expiry_date ?? Date.now() + 3600_000,
         }))
       } catch (e) {
-        finish(() => reject(e))
-      }
-    }
-
-    // Primary: intercept BEFORE Chromium loads the redirect URI
-    authWin.webContents.on('will-redirect', (event, url) => {
-      if (url.startsWith(REDIRECT_URI)) {
-        event.preventDefault()
-        handleCallback(url)
+        settle(() => reject(e))
       }
     })
 
-    // Fallback for Chromium versions that fire did-navigate instead
-    authWin.webContents.on('did-navigate', (_, url) => {
-      if (url.startsWith(REDIRECT_URI)) handleCallback(url)
+    server.listen(0, '127.0.0.1', () => {
+      // Capture port HERE — before any close() can make address() return null
+      listenPort = (server.address() as { port: number }).port
+
+      const client  = new google.auth.OAuth2(clientId, clientSecret, `http://127.0.0.1:${listenPort}`)
+      const authUrl = client.generateAuthUrl({
+        access_type: 'offline',
+        prompt:      'consent',
+        scope: [
+          'https://www.googleapis.com/auth/youtube',
+          'https://www.googleapis.com/auth/youtube.upload',
+        ],
+      })
+
+      shell.openExternal(authUrl)
+      mainWin.webContents.send('youtube:authStarted', authUrl)
     })
 
-    authWin.on('closed', () => {
-      finish(() => reject(new Error('Autenticação cancelada.')))
-    })
-
-    authWin.loadURL(authUrl)
-    mainWin.webContents.send('youtube:authStarted', authUrl)
+    server.on('error', err => settle(() => reject(err)))
   })
 }
 
