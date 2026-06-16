@@ -15,6 +15,10 @@ const MEDIA_TYPES: Record<string, string> = {
   '.webm': 'video/webm',
   '.mkv': 'video/x-matroska',
   '.avi': 'video/x-msvideo',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
 }
 
 // Must be called synchronously before app is ready so Electron treats the

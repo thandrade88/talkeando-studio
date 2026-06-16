@@ -460,6 +460,43 @@ export function registerAIHandlers(ipcMain: IpcMain): void {
     }
   })
 
+  ipcMain.handle('ai:generateClipSummary', async (event, clipId: number, opts?: { provider?: AIProvider }) => {
+    const db = getDatabase()
+    const clip = db.prepare(`
+      SELECT c.*, e.title as episode_title
+      FROM clips c JOIN episodes e ON c.episode_id = e.id
+      WHERE c.id = ?
+    `).get(clipId) as {
+      id: number; episode_id: number; title: string; episode_title: string;
+      start_time: number; end_time: number
+    } | undefined
+    if (!clip) throw new Error('Clip not found')
+
+    const segments = db.prepare(
+      'SELECT text FROM transcripts WHERE episode_id = ? AND start_time < ? AND end_time > ? ORDER BY start_time ASC'
+    ).all(clip.episode_id, clip.end_time, clip.start_time) as { text: string }[]
+    const transcript = segments.map((s) => s.text).join(' ').trim()
+    if (!transcript) throw new Error('Nenhuma transcrição encontrada para o intervalo deste clipe.')
+
+    const provider: AIProvider = opts?.provider ?? (getSetting('ai_provider') as AIProvider) ?? 'claude'
+    const meta = PROVIDER_META[provider]
+
+    const win = BrowserWindow.fromWebContents(event.sender)
+    win?.webContents.send('ai:progress', `Gerando resumo do clipe com ${meta.name}...`)
+
+    const prompt = `Você é um editor de podcasts brasileiros. Com base na transcrição abaixo de um clipe extraído do episódio "${clip.episode_title}" (título do clipe: "${clip.title}"), escreva um resumo claro e objetivo em português brasileiro, de 2 a 4 frases, descrevendo o que é discutido nesse trecho.
+
+TRECHO:
+${transcript}`
+
+    const summary = (await generateText(provider, prompt)).trim()
+    db.prepare('UPDATE clips SET summary = ? WHERE id = ?').run(summary, clipId)
+
+    win?.webContents.send('ai:progress', 'Resumo do clipe gerado!')
+
+    return db.prepare('SELECT * FROM clips WHERE id = ?').get(clipId)
+  })
+
   ipcMain.handle('ai:getKeyMoments', (_event, episodeId: number) => {
     const db = getDatabase()
     return db.prepare('SELECT * FROM key_moments WHERE episode_id = ? ORDER BY start_time ASC').all(episodeId)

@@ -59,6 +59,16 @@ const api = {
     ipcRenderer.invoke('clips:create', episodeId, startTime, endTime, title),
   createClipsFromKeyMoments: (episodeId: number) =>
     ipcRenderer.invoke('clips:createFromKeyMoments', episodeId),
+  updateClip: (clipId: number, startTime: number, endTime: number) =>
+    ipcRenderer.invoke('clips:update', clipId, startTime, endTime),
+  setClipThumbnail: (clipId: number, filePath: string) =>
+    ipcRenderer.invoke('clips:setThumbnail', clipId, filePath),
+  setClipThumbnailFromFrame: (clipId: number, dataUrl: string) =>
+    ipcRenderer.invoke('clips:setThumbnailFromFrame', clipId, dataUrl),
+  generateClipSummary: (clipId: number, options?: Record<string, unknown>) =>
+    ipcRenderer.invoke('ai:generateClipSummary', clipId, options),
+  updateClipSummary: (clipId: number, summary: string) =>
+    ipcRenderer.invoke('clips:updateSummary', clipId, summary),
   exportClip: (clipId: number) => ipcRenderer.invoke('clips:export', clipId),
   deleteClip: (clipId: number) => ipcRenderer.invoke('clips:delete', clipId),
   deleteAllClips: (episodeId: number) => ipcRenderer.invoke('clips:deleteAll', episodeId),
@@ -76,6 +86,9 @@ const api = {
   revealInFinder: (filePath: string) => ipcRenderer.invoke('files:reveal', filePath),
   getAppDataPath: () => ipcRenderer.invoke('files:getAppDataPath'),
   openExternal: (url: string) => ipcRenderer.invoke('files:openExternal', url),
+  copyImageToClipboard: (filePath: string) => ipcRenderer.invoke('files:copyImageToClipboard', filePath),
+  downloadFile: (filePath: string, defaultName?: string) =>
+    ipcRenderer.invoke('files:downloadFile', filePath, defaultName),
 
   // First run
   checkSetupComplete: () => ipcRenderer.invoke('setup:isComplete'),

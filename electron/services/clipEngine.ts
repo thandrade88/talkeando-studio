@@ -2,8 +2,9 @@ import { IpcMain, BrowserWindow } from 'electron'
 import { getDatabase } from './database'
 import { spawn } from 'child_process'
 import { join, basename, extname } from 'path'
-import { existsSync, mkdirSync } from 'fs'
+import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { app } from 'electron'
+import type Database from 'better-sqlite3'
 
 function getFFmpegBinary(): string {
   try {
@@ -14,11 +15,31 @@ function getFFmpegBinary(): string {
   }
 }
 
+function slugify(title: string): string {
+  return title
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'episode'
+}
+
 function secondsToTimestamp(seconds: number): string {
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
   const s = (seconds % 60).toFixed(3)
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(parseFloat(s).toFixed(3)).padStart(6, '0')}`
+}
+
+function safeFilename(title: string): string {
+  return title.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '_')
+}
+
+function getEpisodeOutputDir(db: Database.Database, episodeTitle: string): string {
+  const settingRow = db.prepare("SELECT value FROM settings WHERE key = 'output_directory'").get() as { value: string } | undefined
+  const baseDir = settingRow?.value || join(app.getPath('documents'), 'Talkeando Studio')
+  const outputDir = join(baseDir, 'episodes', slugify(episodeTitle))
+  mkdirSync(outputDir, { recursive: true })
+  return outputDir
 }
 
 export function registerClipHandlers(ipcMain: IpcMain): void {
@@ -53,13 +74,9 @@ export function registerClipHandlers(ipcMain: IpcMain): void {
       throw new Error(`Arquivo de origem não encontrado: ${clip.episode_path}`)
     }
 
-    const settingRow = db.prepare("SELECT value FROM settings WHERE key = 'output_directory'").get() as { value: string } | undefined
-    const outputDir = settingRow?.value || join(app.getPath('documents'), 'Talkeando Studio', 'Clips')
-    mkdirSync(outputDir, { recursive: true })
-
-    const safeTitle = clip.title.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '_')
+    const outputDir = getEpisodeOutputDir(db, clip.episode_title)
     const ext = extname(clip.episode_path) || '.mp4'
-    const outputPath = join(outputDir, `${safeTitle}${ext}`)
+    const outputPath = join(outputDir, `${safeFilename(clip.title)}${ext}`)
 
     const win = BrowserWindow.fromWebContents(event.sender)
     const ffmpeg = getFFmpegBinary()
@@ -106,6 +123,47 @@ export function registerClipHandlers(ipcMain: IpcMain): void {
 
       proc.on('error', reject)
     })
+  })
+
+  ipcMain.handle('clips:setThumbnail', (_event, clipId: number, filePath: string) => {
+    const db = getDatabase()
+    if (!existsSync(filePath)) {
+      throw new Error(`Arquivo não encontrado: ${filePath}`)
+    }
+    db.prepare('UPDATE clips SET thumbnail_path = ? WHERE id = ?').run(filePath, clipId)
+    return db.prepare('SELECT * FROM clips WHERE id = ?').get(clipId)
+  })
+
+  ipcMain.handle('clips:setThumbnailFromFrame', (_event, clipId: number, dataUrl: string) => {
+    const db = getDatabase()
+    const clip = db.prepare(`
+      SELECT c.title as title, e.title as episode_title
+      FROM clips c JOIN episodes e ON c.episode_id = e.id
+      WHERE c.id = ?
+    `).get(clipId) as { title: string; episode_title: string } | undefined
+    if (!clip) throw new Error('Clip not found')
+
+    const match = dataUrl.match(/^data:image\/jpeg;base64,(.+)$/)
+    if (!match) throw new Error('Frame inválido')
+
+    const outputDir = getEpisodeOutputDir(db, clip.episode_title)
+    const outputPath = join(outputDir, `${safeFilename(clip.title)}_thumb.jpg`)
+    writeFileSync(outputPath, Buffer.from(match[1], 'base64'))
+
+    db.prepare('UPDATE clips SET thumbnail_path = ? WHERE id = ?').run(outputPath, clipId)
+    return db.prepare('SELECT * FROM clips WHERE id = ?').get(clipId)
+  })
+
+  ipcMain.handle('clips:updateSummary', (_event, clipId: number, summary: string) => {
+    const db = getDatabase()
+    db.prepare('UPDATE clips SET summary = ? WHERE id = ?').run(summary, clipId)
+    return db.prepare('SELECT * FROM clips WHERE id = ?').get(clipId)
+  })
+
+  ipcMain.handle('clips:update', (_event, clipId: number, startTime: number, endTime: number) => {
+    const db = getDatabase()
+    db.prepare('UPDATE clips SET start_time = ?, end_time = ? WHERE id = ?').run(startTime, endTime, clipId)
+    return db.prepare('SELECT * FROM clips WHERE id = ?').get(clipId)
   })
 
   ipcMain.handle('clips:delete', (_event, clipId: number) => {

@@ -56,6 +56,11 @@ interface Window {
     getClips: (episodeId: number) => Promise<Clip[]>
     createClip: (episodeId: number, startTime: number, endTime: number, title: string) => Promise<Clip>
     createClipsFromKeyMoments: (episodeId: number) => Promise<Clip[]>
+    updateClip: (clipId: number, startTime: number, endTime: number) => Promise<Clip>
+    setClipThumbnail: (clipId: number, filePath: string) => Promise<Clip>
+    setClipThumbnailFromFrame: (clipId: number, dataUrl: string) => Promise<Clip>
+    generateClipSummary: (clipId: number, options?: { provider?: 'claude' | 'openai' | 'gemini' }) => Promise<Clip>
+    updateClipSummary: (clipId: number, summary: string) => Promise<Clip>
     exportClip: (clipId: number) => Promise<{ success: boolean; filePath: string }>
     deleteClip: (clipId: number) => Promise<{ success: boolean }>
     deleteAllClips: (episodeId: number) => Promise<{ success: boolean }>
@@ -66,6 +71,8 @@ interface Window {
     revealInFinder: (filePath: string) => Promise<{ success: boolean }>
     getAppDataPath: () => Promise<string>
     openExternal: (url: string) => Promise<{ success: boolean }>
+    copyImageToClipboard: (filePath: string) => Promise<{ success: boolean }>
+    downloadFile: (filePath: string, defaultName?: string) => Promise<string | null>
 
     checkSetupComplete: () => Promise<boolean>
     shouldShowSetup: () => Promise<boolean>
@@ -133,4 +140,6 @@ interface Clip {
   title: string
   reason: string
   file_path: string
+  thumbnail_path: string
+  summary: string
 }

@@ -274,13 +274,16 @@ export default function Settings() {
                 <input
                   type="text" readOnly
                   value={settings.output_directory ?? ''}
-                  placeholder="Padrão: ~/Documents/Talkeando Studio/Clips"
+                  placeholder="Padrão: ~/Documents/Talkeando Studio"
                   className="flex-1 bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none text-muted-foreground"
                 />
                 <button onClick={chooseOutputDir} className="px-3 py-2 text-sm bg-secondary hover:bg-secondary/80 border border-border rounded-lg">
                   Escolher
                 </button>
               </div>
+              <p className="text-xs text-muted-foreground">
+                Cada episódio terá sua própria subpasta: <span className="font-mono">episodes/{'{'}nome-do-episódio{'}'}</span>
+              </p>
             </section>
           </div>
         )}

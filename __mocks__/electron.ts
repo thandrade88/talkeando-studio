@@ -47,3 +47,12 @@ export const shell = {
   openPath: vi.fn(() => Promise.resolve('')),
   showItemInFolder: vi.fn(),
 }
+
+export const clipboard = {
+  writeImage: vi.fn(),
+  writeText: vi.fn(),
+}
+
+export const nativeImage = {
+  createFromPath: vi.fn(() => ({ isEmpty: vi.fn(() => false) })),
+}

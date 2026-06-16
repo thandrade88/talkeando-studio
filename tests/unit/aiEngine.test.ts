@@ -32,6 +32,7 @@ describe('registerAIHandlers — channel registration', () => {
       'ai:generate',
       'ai:generateResume',
       'ai:getKeyMoments',
+      'ai:generateClipSummary',
       'ai:saveContent',
       'ai:deleteContent',
       'ai:getDefaultBlogPrompt',
