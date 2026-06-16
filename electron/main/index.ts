@@ -42,6 +42,7 @@ import { registerClipHandlers } from '../services/clipEngine'
 import { registerFileHandlers } from '../services/fileManager'
 import { registerWhisperSetupHandlers } from '../services/whisperSetup'
 import { registerFirstRunHandlers } from '../services/firstRunSetup'
+import { registerYouTubeHandlers } from '../services/youtubeService'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -135,6 +136,7 @@ app.whenReady().then(() => {
   registerFileHandlers(ipcMain)
   registerWhisperSetupHandlers(ipcMain)
   registerFirstRunHandlers()
+  registerYouTubeHandlers(ipcMain)
 
   createWindow()
 

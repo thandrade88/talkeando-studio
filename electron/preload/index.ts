@@ -109,7 +109,31 @@ const api = {
   // Settings
   getSetting: (key: string) => ipcRenderer.invoke('settings:get', key),
   setSetting: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value),
-  getAllSettings: () => ipcRenderer.invoke('settings:getAll')
+  getAllSettings: () => ipcRenderer.invoke('settings:getAll'),
+
+  // YouTube
+  getYouTubeStatus: () => ipcRenderer.invoke('youtube:getStatus'),
+  saveYouTubeCredentials: (clientId: string, clientSecret: string) =>
+    ipcRenderer.invoke('youtube:saveCredentials', clientId, clientSecret),
+  connectYouTube: () => ipcRenderer.invoke('youtube:connect'),
+  disconnectYouTube: () => ipcRenderer.invoke('youtube:disconnect'),
+  listYouTubeChannels: () => ipcRenderer.invoke('youtube:listChannels'),
+  saveYouTubeChannelConfig: (mainChannelId: string, cutsChannelId: string) =>
+    ipcRenderer.invoke('youtube:saveChannelConfig', mainChannelId, cutsChannelId),
+  uploadToYouTube: (opts: {
+    filePath: string; title: string; description: string; channelId: string;
+    tags?: string[]; privacyStatus?: 'public' | 'unlisted' | 'private'
+  }) => ipcRenderer.invoke('youtube:uploadVideo', opts),
+  onYouTubeUploadProgress: (cb: (pct: number) => void) => {
+    const handler = (_: unknown, pct: number) => cb(pct)
+    ipcRenderer.on('youtube:uploadProgress', handler)
+    return () => ipcRenderer.removeListener('youtube:uploadProgress', handler)
+  },
+  onYouTubeAuthStarted: (cb: (url: string) => void) => {
+    const handler = (_: unknown, url: string) => cb(url)
+    ipcRenderer.on('youtube:authStarted', handler)
+    return () => ipcRenderer.removeListener('youtube:authStarted', handler)
+  }
 }
 
 if (process.contextIsolated) {

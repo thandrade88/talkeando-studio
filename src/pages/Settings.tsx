@@ -14,6 +14,9 @@ import {
   Terminal,
   Sparkles,
   RotateCcw,
+  Youtube,
+  Link,
+  Unlink,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
 
@@ -76,9 +79,27 @@ export default function Settings() {
   const [isInstalling, setIsInstalling] = useState(false)
   const [downloadingModel, setDownloadingModel] = useState<string | null>(null)
 
+  // YouTube
+  const [ytClientId, setYtClientId]         = useState('')
+  const [ytClientSecret, setYtClientSecret] = useState('')
+  const [ytConnected, setYtConnected]       = useState(false)
+  const [ytChannels, setYtChannels]         = useState<YouTubeChannel[]>([])
+  const [ytMainChannel, setYtMainChannel]   = useState('')
+  const [ytCutsChannel, setYtCutsChannel]   = useState('')
+  const [ytConnecting, setYtConnecting]     = useState(false)
+  const [ytSavedChannels, setYtSavedChannels] = useState(false)
+  const [ytError, setYtError]               = useState<string | null>(null)
+
   const defaultPromptsRef = useRef<Record<string, string>>({})
 
   useEffect(() => {
+    window.api.getYouTubeStatus().then(s => {
+      if (s.clientId) setYtClientId(s.clientId)
+      setYtConnected(s.connected)
+      if (s.mainChannelId) setYtMainChannel(s.mainChannelId)
+      if (s.cutsChannelId) setYtCutsChannel(s.cutsChannelId)
+      if (s.connected) window.api.listYouTubeChannels().then(setYtChannels).catch(() => {})
+    })
     window.api.getAllSettings().then(setSettings)
     loadWhisperStatus()
     Promise.all([
@@ -138,6 +159,39 @@ export default function Settings() {
     } finally {
       setDownloadingModel(null); setSetupStatus(null)
     }
+  }
+
+  async function saveYtCredentials() {
+    if (!ytClientId.trim() || !ytClientSecret.trim()) return
+    setYtError(null)
+    await window.api.saveYouTubeCredentials(ytClientId.trim(), ytClientSecret.trim())
+    setSaved(p => ({ ...p, yt_creds: true }))
+    setTimeout(() => setSaved(p => ({ ...p, yt_creds: false })), 2000)
+  }
+
+  async function connectYouTube() {
+    setYtConnecting(true); setYtError(null)
+    try {
+      const result = await window.api.connectYouTube()
+      setYtConnected(true)
+      setYtChannels(result.channels)
+    } catch (err) {
+      setYtError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setYtConnecting(false)
+    }
+  }
+
+  async function disconnectYouTube() {
+    await window.api.disconnectYouTube()
+    setYtConnected(false); setYtChannels([])
+    setYtMainChannel(''); setYtCutsChannel('')
+  }
+
+  async function saveChannelConfig() {
+    await window.api.saveYouTubeChannelConfig(ytMainChannel, ytCutsChannel)
+    setYtSavedChannels(true)
+    setTimeout(() => setYtSavedChannels(false), 2000)
   }
 
   return (
@@ -262,6 +316,96 @@ export default function Settings() {
                 />
                 <SaveButton onClick={() => saveSetting('wordpress_url', settings.wordpress_url ?? '')} saved={saved.wordpress_url} />
               </div>
+            </section>
+
+            {/* YouTube */}
+            <section className="bg-card border border-border rounded-xl p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold flex items-center gap-2">
+                  <Youtube className="w-4 h-4 text-red-500" />
+                  YouTube
+                </h2>
+                {ytConnected && (
+                  <button onClick={disconnectYouTube}
+                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-destructive">
+                    <Unlink className="w-3.5 h-3.5" />Desconectar
+                  </button>
+                )}
+              </div>
+
+              {/* Step 1: credentials */}
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Crie credenciais OAuth 2.0 (tipo <strong className="text-foreground">Aplicativo para computador</strong>) no{' '}
+                  <button onClick={() => window.api.openExternal('https://console.cloud.google.com/apis/credentials')}
+                    className="text-primary underline underline-offset-2">Google Cloud Console</button>{' '}
+                  e ative a <strong className="text-foreground">YouTube Data API v3</strong>.
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Client ID</label>
+                    <input type="text" value={ytClientId} onChange={e => setYtClientId(e.target.value)}
+                      placeholder="*.apps.googleusercontent.com"
+                      className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-primary/40" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Client Secret</label>
+                    <input type="password" value={ytClientSecret} onChange={e => setYtClientSecret(e.target.value)}
+                      placeholder="GOCSPX-…"
+                      className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-primary/40" />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={saveYtCredentials}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-secondary hover:bg-secondary/80 border border-border rounded-lg">
+                    {saved.yt_creds ? <Check className="w-3 h-3 text-primary" /> : <Key className="w-3 h-3" />}
+                    {saved.yt_creds ? 'Salvo!' : 'Salvar credenciais'}
+                  </button>
+                  {!ytConnected && (
+                    <button onClick={connectYouTube} disabled={ytConnecting || !ytClientId || !ytClientSecret}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-red-500 hover:bg-red-600 text-white rounded-lg disabled:opacity-50">
+                      {ytConnecting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Link className="w-3 h-3" />}
+                      {ytConnecting ? 'Aguardando autorização…' : 'Conectar conta Google'}
+                    </button>
+                  )}
+                  {ytConnected && (
+                    <span className="flex items-center gap-1.5 text-xs text-green-500">
+                      <CheckCircle2 className="w-3.5 h-3.5" />Conta conectada
+                    </span>
+                  )}
+                </div>
+                {ytError && <p className="text-xs text-destructive">{ytError}</p>}
+              </div>
+
+              {/* Step 2: channel config (only if connected and channels loaded) */}
+              {ytConnected && ytChannels.length > 0 && (
+                <div className="space-y-3 pt-2 border-t border-border">
+                  <p className="text-xs text-muted-foreground">Escolha qual canal recebe cada tipo de conteúdo.</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1.5 block">Canal principal (episódios)</label>
+                      <select value={ytMainChannel} onChange={e => setYtMainChannel(e.target.value)}
+                        className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary/40">
+                        <option value="">Selecionar canal…</option>
+                        {ytChannels.map(ch => <option key={ch.id} value={ch.id}>{ch.title}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1.5 block">Canal de cortes (clipes)</label>
+                      <select value={ytCutsChannel} onChange={e => setYtCutsChannel(e.target.value)}
+                        className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary/40">
+                        <option value="">Selecionar canal…</option>
+                        {ytChannels.map(ch => <option key={ch.id} value={ch.id}>{ch.title}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <button onClick={saveChannelConfig} disabled={!ytMainChannel || !ytCutsChannel}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-secondary hover:bg-secondary/80 border border-border rounded-lg disabled:opacity-50">
+                    {ytSavedChannels ? <Check className="w-3 h-3 text-primary" /> : <Check className="w-3 h-3" />}
+                    {ytSavedChannels ? 'Salvo!' : 'Salvar canais'}
+                  </button>
+                </div>
+              )}
             </section>
 
             {/* Output dir */}

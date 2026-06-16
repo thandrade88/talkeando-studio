@@ -4,7 +4,7 @@ import {
   ArrowLeft, FileText, Sparkles, Scissors, Loader2, Clock,
   Save, Trash2, RefreshCw, ChevronDown, RotateCcw, Plus, Download, FolderOpen,
   Send, Copy, Check, ExternalLink, Globe, CheckCircle2, Circle, Volume2, Image as ImageIcon, Camera,
-  MoveHorizontal, ZoomIn,
+  MoveHorizontal, ZoomIn, Youtube, Upload, Settings,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { cn, formatTimestamp, formatDuration } from '../lib/utils'
@@ -1439,44 +1439,35 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
 
 // ─── Publicar tab ────────────────────────────────────────────────────────────
 
-const PLATFORMS = [
-  {
-    key: 'youtube',
-    label: 'YouTube',
-    color: 'text-red-500',
-    bg: 'bg-red-500/10 border-red-500/20',
-    url: 'https://studio.youtube.com/',
-    urlLabel: 'Abrir YouTube Studio',
-    hint: 'Cole o título e a descrição ao fazer upload do vídeo.',
-  },
-  {
-    key: 'instagram',
-    label: 'Instagram',
-    color: 'text-pink-500',
-    bg: 'bg-pink-500/10 border-pink-500/20',
-    url: 'https://www.instagram.com/',
-    urlLabel: 'Abrir Instagram',
-    hint: 'Cole a legenda na criação do post ou Reels.',
-  },
-  {
-    key: 'blog_post',
-    label: 'WordPress / Blog',
-    color: 'text-blue-400',
-    bg: 'bg-blue-500/10 border-blue-500/20',
-    url: null,
-    urlLabel: 'Abrir WordPress',
-    hint: 'Publique no seu blog ou WordPress.',
-  },
-]
+type UploadTarget = 'episode' | `clip:${number}`
 
-function PublishTab({ episodeId, onGoToContent }: { episodeId: number; onGoToContent: () => void }) {
-  const [contents, setContents] = useState<GeneratedContent[]>([])
-  const [wpUrl, setWpUrl]       = useState<string | null>(null)
-  const [copied, setCopied]     = useState<string | null>(null)
+function PublishTab({ episode, episodeId, onGoToContent }: {
+  episode: Episode; episodeId: number; onGoToContent: () => void
+}) {
+  const navigate = useNavigate()
+  const [contents, setContents]   = useState<GeneratedContent[]>([])
+  const [clips, setClips]         = useState<Clip[]>([])
+  const [wpUrl, setWpUrl]         = useState<string | null>(null)
+  const [copied, setCopied]       = useState<string | null>(null)
+  const [ytStatus, setYtStatus]   = useState<{
+    connected: boolean; mainChannelId: string | null; cutsChannelId: string | null
+  }>({ connected: false, mainChannelId: null, cutsChannelId: null })
+  const [uploading, setUploading] = useState<UploadTarget | null>(null)
+  const [uploadPct, setUploadPct] = useState(0)
+  const [uploadedUrls, setUploadedUrls] = useState<Record<string, string>>({})
+  const [uploadError, setUploadError]   = useState<string | null>(null)
+  const [privacyStatus, setPrivacyStatus] = useState<'private' | 'unlisted' | 'public'>('private')
 
   useEffect(() => {
     window.api.getGeneratedContent(episodeId).then(setContents)
+    window.api.getClips(episodeId).then(setClips)
     window.api.getSetting('wordpress_url').then(setWpUrl)
+    window.api.getYouTubeStatus().then(s => setYtStatus({
+      connected: s.connected,
+      mainChannelId: s.mainChannelId,
+      cutsChannelId: s.cutsChannelId,
+    }))
+    return window.api.onYouTubeUploadProgress(pct => setUploadPct(pct))
   }, [episodeId])
 
   async function copy(text: string, key: string) {
@@ -1485,97 +1476,260 @@ function PublishTab({ episodeId, onGoToContent }: { episodeId: number; onGoToCon
     setTimeout(() => setCopied(null), 2000)
   }
 
-  function openUrl(url: string) {
-    window.api.openExternal(url)
+  async function uploadEpisode() {
+    if (!ytStatus.mainChannelId) return
+    const ytContent = contents.find(c => c.type === 'youtube')
+    setUploading('episode'); setUploadPct(0); setUploadError(null)
+    try {
+      const result = await window.api.uploadToYouTube({
+        filePath:      episode.file_path,
+        title:         episode.title,
+        description:   ytContent?.content ?? '',
+        channelId:     ytStatus.mainChannelId,
+        privacyStatus,
+      })
+      setUploadedUrls(prev => ({ ...prev, episode: result.videoUrl }))
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setUploading(null)
+    }
   }
+
+  async function uploadClip(clip: Clip) {
+    if (!ytStatus.cutsChannelId || !clip.file_path) return
+    const key = `clip:${clip.id}` as UploadTarget
+    setUploading(key); setUploadPct(0); setUploadError(null)
+    try {
+      const result = await window.api.uploadToYouTube({
+        filePath:      clip.file_path,
+        title:         clip.title,
+        description:   clip.summary ?? '',
+        channelId:     ytStatus.cutsChannelId,
+        privacyStatus,
+      })
+      setUploadedUrls(prev => ({ ...prev, [key]: result.videoUrl }))
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setUploading(null)
+    }
+  }
+
+  const ytContent    = contents.find(c => c.type === 'youtube')
+  const blogContent  = contents.find(c => c.type === 'blog_post')
+  const igContent    = contents.find(c => c.type === 'instagram')
+
+  const ytNotConfigured = !ytStatus.connected || !ytStatus.mainChannelId || !ytStatus.cutsChannelId
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
-      <div className="max-w-3xl mx-auto space-y-4">
-        <p className="text-xs text-muted-foreground mb-4">
-          Copie o conteúdo gerado e publique em cada plataforma. Gere o conteúdo primeiro na aba <strong className="text-foreground">Conteúdo</strong>.
-        </p>
+      <div className="max-w-4xl mx-auto space-y-5">
 
-        {PLATFORMS.map(platform => {
-          const content = contents.find(c => c.type === platform.key)
-          const resolvedUrl = platform.key === 'blog_post' ? (wpUrl || null) : platform.url
-
-          return (
-            <div key={platform.key} className="bg-card border border-border rounded-xl overflow-hidden">
-              {/* card header */}
-              <div className={cn('flex items-center justify-between px-4 py-3 border-b border-border', content ? '' : 'opacity-60')}>
-                <div className="flex items-center gap-2">
-                  <div className={cn('w-2 h-2 rounded-full', content ? platform.color.replace('text-', 'bg-') : 'bg-muted-foreground/30')} />
-                  <span className={cn('text-sm font-semibold', content ? platform.color : 'text-muted-foreground')}>
-                    {platform.label}
-                  </span>
-                  {content && <span className="text-xs text-muted-foreground">· pronto</span>}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {content && (
-                    <button
-                      onClick={() => copy(content.content, platform.key)}
-                      className={cn(
-                        'flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md transition-colors border',
-                        copied === platform.key
-                          ? 'bg-primary/20 text-primary border-primary/30'
-                          : 'bg-secondary hover:bg-secondary/80 border-border'
-                      )}
-                    >
-                      {copied === platform.key ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                      {copied === platform.key ? 'Copiado!' : 'Copiar'}
-                    </button>
-                  )}
-
-                  {content && resolvedUrl && (
-                    <button
-                      onClick={() => openUrl(resolvedUrl)}
-                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-primary hover:bg-primary/90 text-white transition-colors"
-                    >
-                      <ExternalLink className="w-3 h-3" />
-                      {platform.urlLabel}
-                    </button>
-                  )}
-
-                  {content && platform.key === 'blog_post' && !wpUrl && (
-                    <button
-                      onClick={() => window.api.openExternal('https://wordpress.org/').then(() => {})}
-                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-secondary hover:bg-secondary/80 border border-border text-muted-foreground"
-                    >
-                      <Globe className="w-3 h-3" />
-                      Configure URL em Configurações
-                    </button>
-                  )}
-
-                  {!content && (
-                    <button
-                      onClick={onGoToContent}
-                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-secondary hover:bg-secondary/80 border border-border text-muted-foreground transition-colors"
-                    >
-                      <Sparkles className="w-3 h-3" />
-                      Gerar conteúdo
-                    </button>
-                  )}
-                </div>
+        {/* ── YouTube ── */}
+        <section className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center">
+                <Youtube className="w-4 h-4 text-red-500" />
               </div>
-
-              {/* content preview */}
-              {content ? (
-                <div className="px-4 py-3">
-                  <p className="text-xs text-muted-foreground mb-2">{platform.hint}</p>
-                  <pre className="text-xs font-mono text-foreground/80 whitespace-pre-wrap leading-relaxed max-h-36 overflow-y-auto bg-secondary/40 rounded-lg px-3 py-2 scrollbar-thin">
-                    {content.content.slice(0, 600)}{content.content.length > 600 ? '\n...' : ''}
-                  </pre>
-                </div>
-              ) : (
-                <div className="px-4 py-4 text-center text-muted-foreground/50">
-                  <p className="text-xs">Conteúdo não gerado ainda</p>
-                </div>
+              <div>
+                <p className="text-sm font-semibold">YouTube</p>
+                <p className="text-xs text-muted-foreground">
+                  {ytStatus.connected ? 'Conta conectada' : 'Conta não conectada'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {/* privacy selector */}
+              {ytStatus.connected && (
+                <select value={privacyStatus} onChange={e => setPrivacyStatus(e.target.value as typeof privacyStatus)}
+                  className="text-xs bg-secondary border border-border rounded-lg px-2 py-1.5 focus:outline-none">
+                  <option value="private">Privado</option>
+                  <option value="unlisted">Não listado</option>
+                  <option value="public">Público</option>
+                </select>
+              )}
+              {!ytStatus.connected && (
+                <button onClick={() => navigate('/settings')}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary border border-border rounded-lg text-muted-foreground">
+                  <Settings className="w-3 h-3" />Configurar em Configurações
+                </button>
               )}
             </div>
-          )
-        })}
+          </div>
+
+          <div className="p-5 space-y-4">
+            {ytNotConfigured && ytStatus.connected && (
+              <div className="text-xs text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+                Configure o canal principal e o canal de cortes em <strong>Configurações → YouTube</strong> antes de publicar.
+              </div>
+            )}
+
+            {/* Episode upload row */}
+            <div className="flex items-center gap-4 py-3 border-b border-border/50">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{episode.title}</p>
+                <p className="text-xs text-muted-foreground">Episódio completo → canal principal</p>
+                {!episode.file_path && (
+                  <p className="text-xs text-destructive mt-0.5">Arquivo não encontrado</p>
+                )}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {uploadedUrls.episode ? (
+                  <button onClick={() => window.api.openExternal(uploadedUrls.episode)}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg">
+                    <ExternalLink className="w-3 h-3" />Ver no YouTube
+                  </button>
+                ) : (
+                  <button onClick={uploadEpisode}
+                    disabled={!!uploading || ytNotConfigured || !episode.file_path}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg disabled:opacity-50">
+                    {uploading === 'episode'
+                      ? <><Loader2 className="w-3 h-3 animate-spin" />{uploadPct}%</>
+                      : <><Upload className="w-3 h-3" />Fazer upload</>}
+                  </button>
+                )}
+                {ytContent && (
+                  <button onClick={() => copy(ytContent.content, 'yt_episode')}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary border border-border rounded-lg">
+                    {copied === 'yt_episode' ? <Check className="w-3 h-3 text-primary" /> : <Copy className="w-3 h-3" />}
+                    {copied === 'yt_episode' ? 'Copiado!' : 'Copiar descrição'}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Clip upload rows */}
+            {clips.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-2 opacity-60">Nenhum clipe criado ainda</p>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  Cortes → canal de cortes
+                </p>
+                {clips.map(clip => {
+                  const key = `clip:${clip.id}` as UploadTarget
+                  return (
+                    <div key={clip.id} className="flex items-center gap-4 py-2.5 px-3 bg-secondary/30 rounded-lg">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm truncate">{clip.title}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatTimestamp(clip.start_time)} → {formatTimestamp(clip.end_time)}
+                          {!clip.file_path && <span className="text-amber-500 ml-2">· exportar antes de publicar</span>}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {uploadedUrls[key] ? (
+                          <button onClick={() => window.api.openExternal(uploadedUrls[key])}
+                            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg">
+                            <ExternalLink className="w-3 h-3" />Ver no YouTube
+                          </button>
+                        ) : (
+                          <button onClick={() => uploadClip(clip)}
+                            disabled={!!uploading || ytNotConfigured || !clip.file_path}
+                            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 border border-border rounded-lg disabled:opacity-50">
+                            {uploading === key
+                              ? <><Loader2 className="w-3 h-3 animate-spin" />{uploadPct}%</>
+                              : <><Upload className="w-3 h-3" />Upload</>}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {uploadError && (
+              <p className="text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">{uploadError}</p>
+            )}
+          </div>
+        </section>
+
+        {/* ── Instagram ── */}
+        <section className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-pink-500/10 flex items-center justify-center">
+                <Globe className="w-4 h-4 text-pink-500" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold">Instagram</p>
+                <p className="text-xs text-muted-foreground">Copie a legenda e publique manualmente</p>
+              </div>
+            </div>
+            {igContent && (
+              <div className="flex items-center gap-2">
+                <button onClick={() => copy(igContent.content, 'instagram')}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary border border-border rounded-lg">
+                  {copied === 'instagram' ? <Check className="w-3 h-3 text-primary" /> : <Copy className="w-3 h-3" />}
+                  {copied === 'instagram' ? 'Copiado!' : 'Copiar legenda'}
+                </button>
+                <button onClick={() => window.api.openExternal('https://www.instagram.com/')}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-pink-500 hover:bg-pink-600 text-white rounded-lg">
+                  <ExternalLink className="w-3 h-3" />Abrir Instagram
+                </button>
+              </div>
+            )}
+            {!igContent && (
+              <button onClick={onGoToContent}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary border border-border rounded-lg text-muted-foreground">
+                <Sparkles className="w-3 h-3" />Gerar conteúdo
+              </button>
+            )}
+          </div>
+          {igContent ? (
+            <pre className="px-5 py-4 text-xs font-mono text-foreground/80 whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto">
+              {igContent.content.slice(0, 800)}{igContent.content.length > 800 ? '\n…' : ''}
+            </pre>
+          ) : (
+            <p className="px-5 py-4 text-xs text-muted-foreground/50 text-center">Legenda não gerada ainda</p>
+          )}
+        </section>
+
+        {/* ── WordPress / Blog ── */}
+        <section className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                <Globe className="w-4 h-4 text-blue-400" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold">WordPress / Blog</p>
+                <p className="text-xs text-muted-foreground">Copie o conteúdo e publique no seu blog</p>
+              </div>
+            </div>
+            {blogContent && (
+              <div className="flex items-center gap-2">
+                <button onClick={() => copy(blogContent.content, 'blog')}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary border border-border rounded-lg">
+                  {copied === 'blog' ? <Check className="w-3 h-3 text-primary" /> : <Copy className="w-3 h-3" />}
+                  {copied === 'blog' ? 'Copiado!' : 'Copiar post'}
+                </button>
+                {wpUrl && (
+                  <button onClick={() => window.api.openExternal(wpUrl)}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg">
+                    <ExternalLink className="w-3 h-3" />Abrir WordPress
+                  </button>
+                )}
+              </div>
+            )}
+            {!blogContent && (
+              <button onClick={onGoToContent}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary border border-border rounded-lg text-muted-foreground">
+                <Sparkles className="w-3 h-3" />Gerar conteúdo
+              </button>
+            )}
+          </div>
+          {blogContent ? (
+            <pre className="px-5 py-4 text-xs font-mono text-foreground/80 whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto">
+              {blogContent.content.slice(0, 800)}{blogContent.content.length > 800 ? '\n…' : ''}
+            </pre>
+          ) : (
+            <p className="px-5 py-4 text-xs text-muted-foreground/50 text-center">Post não gerado ainda</p>
+          )}
+        </section>
 
       </div>
     </div>
@@ -1711,7 +1865,7 @@ export default function EpisodeWorkspace() {
       )}
       {tab === 'conteudo'    && <ContentTab       episodeId={episodeId} />}
       {tab === 'clips'       && <ClipsTab         episodeId={episodeId} episode={episode} />}
-      {tab === 'publicar'    && <PublishTab        episodeId={episodeId} onGoToContent={() => setTab('conteudo')} />}
+      {tab === 'publicar'    && <PublishTab        episode={episode} episodeId={episodeId} onGoToContent={() => setTab('conteudo')} />}
     </div>
   )
 }

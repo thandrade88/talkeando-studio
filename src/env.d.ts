@@ -87,7 +87,24 @@ interface Window {
     getSetting: (key: string) => Promise<string | null>
     setSetting: (key: string, value: unknown) => Promise<{ success: boolean }>
     getAllSettings: () => Promise<Record<string, string>>
+
+    // YouTube
+    getYouTubeStatus: () => Promise<{ clientId: string | null; connected: boolean; mainChannelId: string | null; cutsChannelId: string | null }>
+    saveYouTubeCredentials: (clientId: string, clientSecret: string) => Promise<{ success: boolean }>
+    connectYouTube: () => Promise<{ success: boolean; channels: YouTubeChannel[] }>
+    disconnectYouTube: () => Promise<{ success: boolean }>
+    listYouTubeChannels: () => Promise<YouTubeChannel[]>
+    saveYouTubeChannelConfig: (mainChannelId: string, cutsChannelId: string) => Promise<{ success: boolean }>
+    uploadToYouTube: (opts: { filePath: string; title: string; description: string; channelId: string; tags?: string[]; privacyStatus?: 'public' | 'unlisted' | 'private' }) => Promise<{ videoId: string; videoUrl: string }>
+    onYouTubeUploadProgress: (cb: (pct: number) => void) => () => void
+    onYouTubeAuthStarted: (cb: (url: string) => void) => () => void
   }
+}
+
+interface YouTubeChannel {
+  id: string
+  title: string
+  thumb: string | null
 }
 
 interface Episode {
