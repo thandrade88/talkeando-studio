@@ -140,28 +140,46 @@ async function runOAuthFlow(
 }
 
 // ─── channel helpers ─────────────────────────────────────────────────────────
-// `mine: true` returns channels directly associated with the authenticated
-// Google Account. Brand accounts (separate YouTube channels managed via
-// YouTube Studio) may require the user to manually add the channel ID.
+// The YouTube Data API `channels.list(mine: true)` only returns the primary
+// channel tied to the authenticated Google Account. Brand channels (additional
+// channels created via YouTube Studio → "Create a channel") are separate
+// Google Brand Accounts and do NOT appear in that list.
+//
+// We run two passes: `mine: true` for the primary + `managedByMe: true` which
+// can surface brand channels for some account configurations. Duplicates are
+// de-duped by channel ID. Channels still missing must be added manually by ID.
 
-async function fetchChannels(client: InstanceType<typeof google.auth.OAuth2>) {
-  const yt       = google.youtube({ version: 'v3', auth: client })
-  const channels: { id: string; title: string; thumb: string | null }[] = []
-  let pageToken: string | undefined
+type ChannelRow = { id: string; title: string; thumb: string | null }
 
-  do {
-    const res = await yt.channels.list({ part: ['snippet'], mine: true, maxResults: 50, pageToken })
-    for (const ch of res.data.items ?? []) {
-      channels.push({
-        id:    ch.id!,
-        title: ch.snippet?.title ?? ch.id!,
-        thumb: ch.snippet?.thumbnails?.default?.url ?? null,
-      })
-    }
-    pageToken = res.data.nextPageToken ?? undefined
-  } while (pageToken)
+async function fetchChannels(client: InstanceType<typeof google.auth.OAuth2>): Promise<ChannelRow[]> {
+  const yt    = google.youtube({ version: 'v3', auth: client })
+  const seen  = new Set<string>()
+  const rows: ChannelRow[] = []
 
-  return channels
+  async function collect(filter: Record<string, unknown>) {
+    let pageToken: string | undefined
+    do {
+      const res = await yt.channels.list({ part: ['snippet'], maxResults: 50, pageToken, ...filter })
+      for (const ch of res.data.items ?? []) {
+        if (!ch.id || seen.has(ch.id)) continue
+        seen.add(ch.id)
+        rows.push({
+          id:    ch.id,
+          title: ch.snippet?.title ?? ch.id,
+          thumb: ch.snippet?.thumbnails?.default?.url ?? null,
+        })
+      }
+      pageToken = res.data.nextPageToken ?? undefined
+    } while (pageToken)
+  }
+
+  await collect({ mine: true })
+
+  // managedByMe can surface brand channels; errors are silently ignored since
+  // it may require onBehalfOfContentOwner for some account types.
+  try { await collect({ managedByMe: true }) } catch { /* unsupported for this account */ }
+
+  return rows
 }
 
 async function fetchChannelById(

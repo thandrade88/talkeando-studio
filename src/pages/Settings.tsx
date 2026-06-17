@@ -399,13 +399,34 @@ export default function Settings() {
                 <div className="space-y-3 pt-2 border-t border-border">
                   <p className="text-xs text-muted-foreground">Escolha qual canal recebe cada tipo de conteúdo.</p>
 
-                  {/* Manual channel-by-ID input (brand accounts often don't appear in the list) */}
-                  <div className="space-y-1.5">
-                    <label className="text-xs text-muted-foreground">Adicionar canal por ID (se não aparecer na lista)</label>
-                    <div className="flex gap-2">
+                  {/* Channels found automatically */}
+                  {ytChannels.length > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      {ytChannels.length} canal{ytChannels.length > 1 ? 'is encontrados' : ' encontrado'} automaticamente.
+                      {ytChannels.length < 3 && (
+                        <> Canais adicionais (brand accounts) precisam ser adicionados pelo ID — veja abaixo.</>
+                      )}
+                    </p>
+                  )}
+
+                  {/* Manual channel-by-ID for brand accounts */}
+                  <div className="space-y-1.5 p-3 bg-secondary/30 rounded-lg border border-border/50">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-medium text-foreground">Adicionar canal por ID</p>
+                      <button
+                        onClick={() => window.api.openExternal('https://studio.youtube.com')}
+                        className="text-xs text-primary underline underline-offset-2">
+                        Abrir YouTube Studio
+                      </button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Canais criados via "Criar canal" no YouTube Studio são brand accounts e não aparecem automaticamente.
+                      No YouTube Studio: <strong className="text-foreground">Configurações → Canal → Configurações avançadas</strong> — copie o ID do canal.
+                    </p>
+                    <div className="flex gap-2 pt-0.5">
                       <input
                         type="text" value={ytExtraId} onChange={e => setYtExtraId(e.target.value)}
-                        placeholder="UCxxxxxxxxxxxxxxxxxxxxx ou URL do canal"
+                        placeholder="UCxxxxxxxxxxxxxxxxxxxxx"
                         className="flex-1 bg-secondary border border-border rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-primary/40 placeholder:text-muted-foreground/40"
                         onKeyDown={e => { if (e.key === 'Enter') addChannelById() }}
                       />
@@ -420,7 +441,7 @@ export default function Settings() {
 
                   {ytChannels.length === 0 ? (
                     <p className="text-xs text-muted-foreground/60 text-center py-1">
-                      Nenhum canal encontrado automaticamente. Cole o ID do canal acima.
+                      Nenhum canal encontrado automaticamente. Adicione pelo ID acima.
                     </p>
                   ) : (
                     <div className="grid grid-cols-2 gap-3">
