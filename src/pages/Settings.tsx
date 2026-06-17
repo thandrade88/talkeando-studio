@@ -92,16 +92,46 @@ export default function Settings() {
   const [ytExtraId, setYtExtraId]           = useState('')
   const [ytExtraLoading, setYtExtraLoading] = useState(false)
   const [ytExtraError, setYtExtraError]     = useState<string | null>(null)
+  const [ytAuthChannelId, setYtAuthChannelId] = useState<string | null>(null)
+  const [ytMainAuthed, setYtMainAuthed]     = useState(false)
+  const [ytCutsAuthed, setYtCutsAuthed]     = useState(false)
+  const [ytConnectingCh, setYtConnectingCh] = useState<string | null>(null)
 
   const defaultPromptsRef = useRef<Record<string, string>>({})
 
   useEffect(() => {
-    window.api.getYouTubeStatus().then(s => {
+    window.api.getYouTubeStatus().then(async s => {
       if (s.clientId) setYtClientId(s.clientId)
       setYtConnected(s.connected)
+      if (s.authChannelId) setYtAuthChannelId(s.authChannelId)
       if (s.mainChannelId) setYtMainChannel(s.mainChannelId)
       if (s.cutsChannelId) setYtCutsChannel(s.cutsChannelId)
-      if (s.connected) window.api.listYouTubeChannels().then(setYtChannels).catch(() => {})
+      if (s.connected) {
+        try {
+          const channels = await window.api.listYouTubeChannels()
+          const ids = new Set(channels.map(c => c.id))
+          const missing = [s.mainChannelId, s.cutsChannelId]
+            .filter((id): id is string => !!id && !ids.has(id))
+            .filter((id, i, a) => a.indexOf(id) === i)
+          for (const id of missing) {
+            try {
+              const ch = await window.api.resolveYouTubeChannel(id)
+              channels.push(ch)
+            } catch { /* channel no longer accessible */ }
+          }
+          setYtChannels(channels)
+        } catch { /* not authenticated */ }
+        if (s.mainChannelId) {
+          const isAuth = s.mainChannelId === s.authChannelId
+          if (isAuth) setYtMainAuthed(true)
+          else window.api.getChannelAuthStatus(s.mainChannelId).then(r => setYtMainAuthed(r.authenticated))
+        }
+        if (s.cutsChannelId) {
+          const isAuth = s.cutsChannelId === s.authChannelId
+          if (isAuth) setYtCutsAuthed(true)
+          else window.api.getChannelAuthStatus(s.cutsChannelId).then(r => setYtCutsAuthed(r.authenticated))
+        }
+      }
     })
     window.api.getAllSettings().then(setSettings)
     loadWhisperStatus()
@@ -195,6 +225,33 @@ export default function Settings() {
     await window.api.saveYouTubeChannelConfig(ytMainChannel, ytCutsChannel)
     setYtSavedChannels(true)
     setTimeout(() => setYtSavedChannels(false), 2000)
+  }
+
+  async function connectForChannel(channelId: string) {
+    setYtConnectingCh(channelId); setYtError(null)
+    try {
+      await window.api.connectForChannel(channelId)
+      if (channelId === ytMainChannel) setYtMainAuthed(true)
+      if (channelId === ytCutsChannel) setYtCutsAuthed(true)
+    } catch (err) {
+      setYtError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setYtConnectingCh(null)
+    }
+  }
+
+  function onMainChannelChange(id: string) {
+    setYtMainChannel(id)
+    if (!id) { setYtMainAuthed(false); return }
+    if (id === ytAuthChannelId) setYtMainAuthed(true)
+    else window.api.getChannelAuthStatus(id).then(r => setYtMainAuthed(r.authenticated))
+  }
+
+  function onCutsChannelChange(id: string) {
+    setYtCutsChannel(id)
+    if (!id) { setYtCutsAuthed(false); return }
+    if (id === ytAuthChannelId) setYtCutsAuthed(true)
+    else window.api.getChannelAuthStatus(id).then(r => setYtCutsAuthed(r.authenticated))
   }
 
   async function addChannelById() {
@@ -445,21 +502,51 @@ export default function Settings() {
                     </p>
                   ) : (
                     <div className="grid grid-cols-2 gap-3">
-                      <div>
+                      <div className="space-y-1.5">
                         <label className="text-xs text-muted-foreground mb-1.5 block">Canal principal (episódios)</label>
-                        <select value={ytMainChannel} onChange={e => setYtMainChannel(e.target.value)}
+                        <select value={ytMainChannel} onChange={e => onMainChannelChange(e.target.value)}
                           className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary/40">
                           <option value="">Selecionar canal…</option>
                           {ytChannels.map(ch => <option key={ch.id} value={ch.id}>{ch.title}</option>)}
                         </select>
+                        {ytMainChannel && !ytMainAuthed && (
+                          <button onClick={() => connectForChannel(ytMainChannel)}
+                            disabled={ytConnectingCh === ytMainChannel}
+                            className="flex items-center gap-1.5 text-xs px-2.5 py-1 bg-amber-500/10 text-amber-500 border border-amber-500/20 rounded-lg disabled:opacity-50">
+                            {ytConnectingCh === ytMainChannel
+                              ? <Loader2 className="w-3 h-3 animate-spin" />
+                              : <Link className="w-3 h-3" />}
+                            Autenticar canal
+                          </button>
+                        )}
+                        {ytMainChannel && ytMainAuthed && (
+                          <span className="flex items-center gap-1 text-xs text-green-500">
+                            <CheckCircle2 className="w-3 h-3" />Autenticado
+                          </span>
+                        )}
                       </div>
-                      <div>
+                      <div className="space-y-1.5">
                         <label className="text-xs text-muted-foreground mb-1.5 block">Canal de cortes (clipes)</label>
-                        <select value={ytCutsChannel} onChange={e => setYtCutsChannel(e.target.value)}
+                        <select value={ytCutsChannel} onChange={e => onCutsChannelChange(e.target.value)}
                           className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary/40">
                           <option value="">Selecionar canal…</option>
                           {ytChannels.map(ch => <option key={ch.id} value={ch.id}>{ch.title}</option>)}
                         </select>
+                        {ytCutsChannel && !ytCutsAuthed && (
+                          <button onClick={() => connectForChannel(ytCutsChannel)}
+                            disabled={ytConnectingCh === ytCutsChannel}
+                            className="flex items-center gap-1.5 text-xs px-2.5 py-1 bg-amber-500/10 text-amber-500 border border-amber-500/20 rounded-lg disabled:opacity-50">
+                            {ytConnectingCh === ytCutsChannel
+                              ? <Loader2 className="w-3 h-3 animate-spin" />
+                              : <Link className="w-3 h-3" />}
+                            Autenticar canal
+                          </button>
+                        )}
+                        {ytCutsChannel && ytCutsAuthed && (
+                          <span className="flex items-center gap-1 text-xs text-green-500">
+                            <CheckCircle2 className="w-3 h-3" />Autenticado
+                          </span>
+                        )}
                       </div>
                     </div>
                   )}

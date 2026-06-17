@@ -44,6 +44,31 @@ function loadTokens(client: InstanceType<typeof google.auth.OAuth2>) {
   return !!access && !!refresh
 }
 
+function loadChannelTokens(client: InstanceType<typeof google.auth.OAuth2>, channelId: string): boolean {
+  const access  = getSetting(`youtube_ch_${channelId}_access`)
+  const refresh = getSetting(`youtube_ch_${channelId}_refresh`)
+  const expiry  = getSetting(`youtube_ch_${channelId}_expiry`)
+  if (access && refresh) {
+    client.setCredentials({
+      access_token:  access,
+      refresh_token: refresh,
+      expiry_date:   expiry ? Number(expiry) : undefined,
+    })
+    client.on('tokens', tokens => {
+      if (tokens.access_token) setSetting(`youtube_ch_${channelId}_access`, tokens.access_token)
+      if (tokens.expiry_date)  setSetting(`youtube_ch_${channelId}_expiry`, String(tokens.expiry_date))
+    })
+    return true
+  }
+  return false
+}
+
+function saveChannelTokens(channelId: string, tokens: { access_token: string; refresh_token: string; expiry_date: number }) {
+  setSetting(`youtube_ch_${channelId}_access`,  tokens.access_token)
+  setSetting(`youtube_ch_${channelId}_refresh`, tokens.refresh_token)
+  setSetting(`youtube_ch_${channelId}_expiry`,  String(tokens.expiry_date))
+}
+
 // ─── OAuth flow (system browser + loopback HTTP server) ─────────────────────
 // Opens Google's consent page in the user's default browser (shell.openExternal)
 // so passkeys, saved passwords, and existing sessions all work normally.
@@ -207,6 +232,7 @@ export function registerYouTubeHandlers(ipcMain: IpcMain): void {
     return {
       clientId,
       connected,
+      authChannelId: getSetting('youtube_auth_channel_id'),
       mainChannelId: getSetting('youtube_main_channel_id'),
       cutsChannelId: getSetting('youtube_cuts_channel_id'),
     }
@@ -235,6 +261,15 @@ export function registerYouTubeHandlers(ipcMain: IpcMain): void {
 
     const client   = buildOAuth2Client()
     loadTokens(client)
+
+    const yt = google.youtube({ version: 'v3', auth: client })
+    const mineRes = await yt.channels.list({ part: ['id'], mine: true })
+    const authChId = mineRes.data.items?.[0]?.id
+    if (authChId) {
+      setSetting('youtube_auth_channel_id', authChId)
+      saveChannelTokens(authChId, tokens)
+    }
+
     const channels = await fetchChannels(client)
     return { success: true, channels }
   })
@@ -243,6 +278,15 @@ export function registerYouTubeHandlers(ipcMain: IpcMain): void {
     setSetting('youtube_access_token',  '')
     setSetting('youtube_refresh_token', '')
     setSetting('youtube_token_expiry',  '')
+    for (const key of ['youtube_main_channel_id', 'youtube_cuts_channel_id', 'youtube_auth_channel_id']) {
+      const chId = getSetting(key)
+      if (chId) {
+        setSetting(`youtube_ch_${chId}_access`, '')
+        setSetting(`youtube_ch_${chId}_refresh`, '')
+        setSetting(`youtube_ch_${chId}_expiry`, '')
+      }
+    }
+    setSetting('youtube_auth_channel_id', '')
     return { success: true }
   })
 
@@ -268,6 +312,37 @@ export function registerYouTubeHandlers(ipcMain: IpcMain): void {
     return { success: true }
   })
 
+  ipcMain.handle('youtube:connectForChannel', async (event, targetChannelId: string) => {
+    const clientId     = getSetting('youtube_client_id')
+    const clientSecret = getSetting('youtube_client_secret')
+    if (!clientId || !clientSecret) throw new Error('Configure o Client ID e o Client Secret primeiro.')
+
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) throw new Error('Janela não encontrada.')
+
+    const tokens = await runOAuthFlow(clientId, clientSecret, win)
+
+    const tempClient = new google.auth.OAuth2(clientId, clientSecret)
+    tempClient.setCredentials({ access_token: tokens.access_token, refresh_token: tokens.refresh_token })
+    const yt  = google.youtube({ version: 'v3', auth: tempClient })
+    const res = await yt.channels.list({ part: ['id', 'snippet'], mine: true })
+    const authChId = res.data.items?.[0]?.id
+
+    if (authChId !== targetChannelId) {
+      const name = res.data.items?.[0]?.snippet?.title ?? authChId
+      throw new Error(`Você autenticou como "${name}", mas o canal esperado é outro. No Google, selecione a conta do canal correto.`)
+    }
+
+    saveChannelTokens(targetChannelId, tokens)
+    return { success: true }
+  })
+
+  ipcMain.handle('youtube:channelAuthStatus', (_event, channelId: string) => {
+    const access  = getSetting(`youtube_ch_${channelId}_access`)
+    const refresh = getSetting(`youtube_ch_${channelId}_refresh`)
+    return { authenticated: !!(access && refresh) }
+  })
+
   ipcMain.handle('youtube:uploadVideo', async (event, opts: {
     filePath: string
     title: string
@@ -278,7 +353,14 @@ export function registerYouTubeHandlers(ipcMain: IpcMain): void {
     privacyStatus?: 'public' | 'unlisted' | 'private'
   }) => {
     const client = buildOAuth2Client()
-    if (!loadTokens(client)) throw new Error('Não autenticado no YouTube.')
+
+    if (!loadChannelTokens(client, opts.channelId)) {
+      const authChId = getSetting('youtube_auth_channel_id')
+      if (authChId && authChId !== opts.channelId) {
+        throw new Error('Este canal precisa ser autenticado separadamente. Vá em Configurações → YouTube para autenticar o canal.')
+      }
+      if (!loadTokens(client)) throw new Error('Não autenticado no YouTube.')
+    }
 
     const win = BrowserWindow.fromWebContents(event.sender)
     const yt  = google.youtube({ version: 'v3', auth: client })
@@ -293,7 +375,6 @@ export function registerYouTubeHandlers(ipcMain: IpcMain): void {
             title:       opts.title,
             description: opts.description,
             tags:        opts.tags,
-            channelId:   opts.channelId,
           },
           status: {
             privacyStatus: opts.privacyStatus ?? 'private',
@@ -321,7 +402,10 @@ export function registerYouTubeHandlers(ipcMain: IpcMain): void {
     tags?: string[]
   }) => {
     const client = buildOAuth2Client()
-    if (!loadTokens(client)) throw new Error('Não autenticado no YouTube.')
+    const mainChId = getSetting('youtube_main_channel_id')
+    if (!((mainChId && loadChannelTokens(client, mainChId)) || loadTokens(client))) {
+      throw new Error('Não autenticado no YouTube.')
+    }
     const yt = google.youtube({ version: 'v3', auth: client })
 
     const existing = await yt.videos.list({ part: ['snippet'], id: [opts.videoId] })

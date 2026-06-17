@@ -121,6 +121,10 @@ const api = {
   resolveYouTubeChannel: (channelId: string) => ipcRenderer.invoke('youtube:resolveChannel', channelId),
   saveYouTubeChannelConfig: (mainChannelId: string, cutsChannelId: string) =>
     ipcRenderer.invoke('youtube:saveChannelConfig', mainChannelId, cutsChannelId),
+  connectForChannel: (channelId: string) =>
+    ipcRenderer.invoke('youtube:connectForChannel', channelId),
+  getChannelAuthStatus: (channelId: string) =>
+    ipcRenderer.invoke('youtube:channelAuthStatus', channelId),
   uploadToYouTube: (opts: {
     filePath: string; title: string; description: string; channelId: string;
     tags?: string[]; privacyStatus?: 'public' | 'unlisted' | 'private'

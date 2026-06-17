@@ -89,13 +89,15 @@ interface Window {
     getAllSettings: () => Promise<Record<string, string>>
 
     // YouTube
-    getYouTubeStatus: () => Promise<{ clientId: string | null; connected: boolean; mainChannelId: string | null; cutsChannelId: string | null }>
+    getYouTubeStatus: () => Promise<{ clientId: string | null; connected: boolean; authChannelId: string | null; mainChannelId: string | null; cutsChannelId: string | null }>
     saveYouTubeCredentials: (clientId: string, clientSecret: string) => Promise<{ success: boolean }>
     connectYouTube: () => Promise<{ success: boolean; channels: YouTubeChannel[] }>
     disconnectYouTube: () => Promise<{ success: boolean }>
     listYouTubeChannels: () => Promise<YouTubeChannel[]>
     resolveYouTubeChannel: (channelId: string) => Promise<YouTubeChannel>
     saveYouTubeChannelConfig: (mainChannelId: string, cutsChannelId: string) => Promise<{ success: boolean }>
+    connectForChannel: (channelId: string) => Promise<{ success: boolean }>
+    getChannelAuthStatus: (channelId: string) => Promise<{ authenticated: boolean }>
     uploadToYouTube: (opts: { filePath: string; title: string; description: string; channelId: string; tags?: string[]; privacyStatus?: 'public' | 'unlisted' | 'private' }) => Promise<{ videoId: string; videoUrl: string }>
     updateYouTubeVideoMetadata: (opts: { videoId: string; title: string; description: string; tags?: string[] }) => Promise<{ success: boolean; videoUrl: string }>
     onYouTubeUploadProgress: (cb: (pct: number) => void) => () => void

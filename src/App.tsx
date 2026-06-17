@@ -28,7 +28,7 @@ export default function App() {
         <SetupWizard onComplete={() => setShowSetup(false)} />
       )}
       <Sidebar />
-      <main className="flex-1 overflow-hidden">
+      <main className="flex-1 overflow-y-auto">
         <Routes>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Dashboard />} />

@@ -122,7 +122,7 @@ function TranscriptionTab({
   const audioSrc = episode.audio_path ? `app-media://${episode.audio_path}` : null
 
   return (
-    <div className="flex flex-col flex-1 overflow-hidden">
+    <div className="flex flex-col flex-1 overflow-y-auto">
 
       {/* ── Pipeline steps ── */}
       <div className="px-6 py-5 border-b border-border shrink-0 space-y-5">
@@ -458,9 +458,9 @@ function ResumoTab({ episodeId, provider }: { episodeId: number; provider: Provi
         </button>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-y-auto">
         {/* left: summary text */}
-        <div className="flex flex-col w-80 shrink-0 border-r border-border overflow-hidden">
+        <div className="flex flex-col w-80 shrink-0 border-r border-border overflow-y-auto">
           <p className="px-4 py-2 text-xs font-medium text-muted-foreground border-b border-border uppercase tracking-wider">Resumo</p>
           <div className="flex-1 overflow-y-auto p-4">
             {summary
@@ -599,7 +599,7 @@ function ContentTab({ episodeId }: { episodeId: number }) {
   const activeMeta    = activeContent ? parseMeta(activeContent.metadata) : null
 
   return (
-    <div className="flex flex-col flex-1 overflow-hidden" onClick={() => providerMenuOpen && setProviderMenuOpen(false)}>
+    <div className="flex flex-col flex-1 overflow-y-auto" onClick={() => providerMenuOpen && setProviderMenuOpen(false)}>
       {/* content-type sub-tabs + action buttons */}
       <div className="flex items-center border-b border-border shrink-0 px-4 gap-2">
         <div className="flex flex-1 items-end overflow-x-auto">
@@ -802,7 +802,7 @@ function ContentTab({ episodeId }: { episodeId: number }) {
       </div>}
 
       {contentType !== 'resumo' && (
-        <div className="flex-1 overflow-hidden flex flex-col px-6 py-4">
+        <div className="flex-1 overflow-y-auto flex flex-col px-6 py-4">
           {!activeContent && !isGenerating && (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
               <Sparkles className="w-10 h-10 opacity-20" />
@@ -1104,9 +1104,9 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
   }
 
   return (
-    <div className="flex flex-1 overflow-hidden">
+    <div className="flex flex-1 overflow-y-auto">
       {/* clip list */}
-      <aside className="w-60 border-r border-border flex flex-col shrink-0 overflow-hidden">
+      <aside className="w-60 border-r border-border flex flex-col shrink-0 overflow-y-auto">
         <div className="px-3 py-3 border-b border-border shrink-0 space-y-2">
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium text-muted-foreground">{clips.length} clipe(s)</p>
@@ -1188,7 +1188,7 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
       </aside>
 
       {/* clip detail */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-y-auto">
         {selected ? (
           <>
             <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
@@ -1542,7 +1542,7 @@ function PublishTab({ episode, episodeId, onGoToContent }: {
     <div className="flex-1 overflow-y-auto p-6">
       <div className="max-w-4xl mx-auto space-y-5">
 
-        {/* ── YouTube ── */}
+        {/* ── YouTube — Canal Principal ── */}
         <section className="bg-card border border-border rounded-xl overflow-hidden">
           <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
             <div className="flex items-center gap-2.5">
@@ -1550,138 +1550,139 @@ function PublishTab({ episode, episodeId, onGoToContent }: {
                 <Youtube className="w-4 h-4 text-red-500" />
               </div>
               <div>
-                <p className="text-sm font-semibold">YouTube</p>
-                <p className="text-xs text-muted-foreground">
-                  {ytStatus.connected ? 'Conta conectada' : 'Conta não conectada'}
-                </p>
+                <p className="text-sm font-semibold">Canal Principal</p>
+                <p className="text-xs text-muted-foreground">Atualizar metadados do episódio</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              {!ytStatus.connected && (
-                <button onClick={() => navigate('/settings')}
-                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary border border-border rounded-lg text-muted-foreground">
-                  <Settings className="w-3 h-3" />Configurar em Configurações
-                </button>
-              )}
-            </div>
+            {!ytStatus.connected && (
+              <button onClick={() => navigate('/settings')}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary border border-border rounded-lg text-muted-foreground">
+                <Settings className="w-3 h-3" />Configurar
+              </button>
+            )}
           </div>
 
-          <div className="p-5 space-y-5">
-            {!ytStatus.connected && (
+          <div className="p-5">
+            {!ytStatus.connected ? (
               <p className="text-xs text-muted-foreground/60 text-center py-1">Conecte sua conta do YouTube nas configurações.</p>
+            ) : !ytStatus.mainChannelId ? (
+              <p className="text-xs text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+                Configure o canal principal em <strong>Configurações → YouTube</strong>.
+              </p>
+            ) : (
+              <div className="space-y-2.5">
+                <p className="text-xs text-muted-foreground">
+                  Cole o link ou ID do vídeo do YouTube para atualizar título e descrição com o conteúdo gerado.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={episodeVideoId}
+                    onChange={e => setEpisodeVideoId(e.target.value)}
+                    placeholder="https://youtu.be/... ou ID do vídeo"
+                    className="flex-1 text-xs bg-secondary border border-border rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-primary/50 placeholder:text-muted-foreground/40"
+                  />
+                  <button
+                    onClick={updateEpisodeMetadata}
+                    disabled={metaUpdating || !episodeVideoId.trim()}
+                    className="flex items-center gap-1.5 text-xs px-3 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg disabled:opacity-50 shrink-0">
+                    {metaUpdating
+                      ? <><Loader2 className="w-3 h-3 animate-spin" />Atualizando...</>
+                      : metaUpdated
+                        ? <><Check className="w-3 h-3" />Atualizado!</>
+                        : <>Atualizar metadados</>}
+                  </button>
+                  {ytContent && (
+                    <button onClick={() => copy(ytContent.content, 'yt_episode')}
+                      className="flex items-center gap-1.5 text-xs px-3 py-2 bg-secondary border border-border rounded-lg shrink-0">
+                      {copied === 'yt_episode' ? <Check className="w-3 h-3 text-primary" /> : <Copy className="w-3 h-3" />}
+                      {copied === 'yt_episode' ? 'Copiado!' : 'Copiar descrição'}
+                    </button>
+                  )}
+                </div>
+                {metaError && (
+                  <p className="text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">{metaError}</p>
+                )}
+                {episodeVideoId && !metaUpdating && (
+                  <button
+                    onClick={() => window.api.openExternal(`https://youtu.be/${extractVideoId(episodeVideoId)}`)}
+                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+                    <ExternalLink className="w-3 h-3" />Ver vídeo no YouTube
+                  </button>
+                )}
+              </div>
             )}
+          </div>
+        </section>
 
-            {ytStatus.connected && (
-              <>
-                {/* ── Canal principal: atualizar metadados da live ── */}
-                <div className="space-y-2.5">
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Canal principal — atualizar metadados</p>
-                    <span className="text-xs text-muted-foreground/50">(episódio já está ao vivo)</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Cole o link ou ID do vídeo do YouTube para atualizar título e descrição com o conteúdo gerado.
-                  </p>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={episodeVideoId}
-                      onChange={e => setEpisodeVideoId(e.target.value)}
-                      placeholder="https://youtu.be/... ou ID do vídeo"
-                      className="flex-1 text-xs bg-secondary border border-border rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-primary/50 placeholder:text-muted-foreground/40"
-                    />
-                    <button
-                      onClick={updateEpisodeMetadata}
-                      disabled={metaUpdating || !episodeVideoId.trim() || !ytStatus.connected}
-                      className="flex items-center gap-1.5 text-xs px-3 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg disabled:opacity-50 shrink-0">
-                      {metaUpdating
-                        ? <><Loader2 className="w-3 h-3 animate-spin" />Atualizando...</>
-                        : metaUpdated
-                          ? <><Check className="w-3 h-3" />Atualizado!</>
-                          : <>Atualizar metadados</>}
-                    </button>
-                    {ytContent && (
-                      <button onClick={() => copy(ytContent.content, 'yt_episode')}
-                        className="flex items-center gap-1.5 text-xs px-3 py-2 bg-secondary border border-border rounded-lg shrink-0">
-                        {copied === 'yt_episode' ? <Check className="w-3 h-3 text-primary" /> : <Copy className="w-3 h-3" />}
-                        {copied === 'yt_episode' ? 'Copiado!' : 'Copiar descrição'}
-                      </button>
-                    )}
-                  </div>
-                  {metaError && (
-                    <p className="text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">{metaError}</p>
-                  )}
-                  {episodeVideoId && !metaUpdating && (
-                    <button
-                      onClick={() => window.api.openExternal(`https://youtu.be/${extractVideoId(episodeVideoId)}`)}
-                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-                      <ExternalLink className="w-3 h-3" />Ver vídeo no YouTube
-                    </button>
-                  )}
-                </div>
+        {/* ── YouTube — Canal de Cortes ── */}
+        <section className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center">
+                <Scissors className="w-4 h-4 text-red-500" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold">Canal de Cortes</p>
+                <p className="text-xs text-muted-foreground">Upload dos clipes</p>
+              </div>
+            </div>
+            {ytStatus.cutsChannelId && (
+              <select value={privacyStatus} onChange={e => setPrivacyStatus(e.target.value as typeof privacyStatus)}
+                className="text-xs bg-secondary border border-border rounded-lg px-2 py-1 focus:outline-none">
+                <option value="private">Privado</option>
+                <option value="unlisted">Não listado</option>
+                <option value="public">Público</option>
+              </select>
+            )}
+          </div>
 
-                {/* ── Canal de cortes: upload dos clipes ── */}
-                <div className="space-y-2.5 pt-2 border-t border-border/50">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Canal de cortes — upload dos clipes</p>
-                    {ytStatus.cutsChannelId && (
-                      <select value={privacyStatus} onChange={e => setPrivacyStatus(e.target.value as typeof privacyStatus)}
-                        className="text-xs bg-secondary border border-border rounded-lg px-2 py-1 focus:outline-none">
-                        <option value="private">Privado</option>
-                        <option value="unlisted">Não listado</option>
-                        <option value="public">Público</option>
-                      </select>
-                    )}
-                  </div>
-
-                  {!ytStatus.cutsChannelId && (
-                    <p className="text-xs text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
-                      Configure o canal de cortes em <strong>Configurações → YouTube</strong>.
-                    </p>
-                  )}
-
-                  {clips.length === 0 ? (
-                    <p className="text-xs text-muted-foreground/60 text-center py-2">Nenhum clipe criado ainda</p>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {clips.map(clip => {
-                        const key = `clip:${clip.id}` as `clip:${number}`
-                        return (
-                          <div key={clip.id} className="flex items-center gap-4 py-2.5 px-3 bg-secondary/30 rounded-lg">
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm truncate">{clip.title}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {formatTimestamp(clip.start_time)} → {formatTimestamp(clip.end_time)}
-                                {!clip.file_path && <span className="text-amber-500 ml-2">· exportar antes de publicar</span>}
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              {uploadedUrls[key] ? (
-                                <button onClick={() => window.api.openExternal(uploadedUrls[key])}
-                                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg">
-                                  <ExternalLink className="w-3 h-3" />Ver no YouTube
-                                </button>
-                              ) : (
-                                <button onClick={() => uploadClip(clip)}
-                                  disabled={!!uploading || ytCutsNotConfigured || !clip.file_path}
-                                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 border border-border rounded-lg disabled:opacity-50">
-                                  {uploading === key
-                                    ? <><Loader2 className="w-3 h-3 animate-spin" />{uploadPct}%</>
-                                    : <><Upload className="w-3 h-3" />Upload</>}
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        )
-                      })}
+          <div className="p-5">
+            {!ytStatus.connected ? (
+              <p className="text-xs text-muted-foreground/60 text-center py-1">Conecte sua conta do YouTube nas configurações.</p>
+            ) : !ytStatus.cutsChannelId ? (
+              <p className="text-xs text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+                Configure o canal de cortes em <strong>Configurações → YouTube</strong>.
+              </p>
+            ) : clips.length === 0 ? (
+              <p className="text-xs text-muted-foreground/60 text-center py-2">Nenhum clipe criado ainda</p>
+            ) : (
+              <div className="space-y-1.5">
+                {clips.map(clip => {
+                  const key = `clip:${clip.id}` as `clip:${number}`
+                  return (
+                    <div key={clip.id} className="flex items-center gap-4 py-2.5 px-3 bg-secondary/30 rounded-lg">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm truncate">{clip.title}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatTimestamp(clip.start_time)} → {formatTimestamp(clip.end_time)}
+                          {!clip.file_path && <span className="text-amber-500 ml-2">· exportar antes de publicar</span>}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {uploadedUrls[key] ? (
+                          <button onClick={() => window.api.openExternal(uploadedUrls[key])}
+                            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg">
+                            <ExternalLink className="w-3 h-3" />Ver no YouTube
+                          </button>
+                        ) : (
+                          <button onClick={() => uploadClip(clip)}
+                            disabled={!!uploading || ytCutsNotConfigured || !clip.file_path}
+                            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 border border-border rounded-lg disabled:opacity-50">
+                            {uploading === key
+                              ? <><Loader2 className="w-3 h-3 animate-spin" />{uploadPct}%</>
+                              : <><Upload className="w-3 h-3" />Upload</>}
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  )}
+                  )
+                })}
 
-                  {uploadError && (
-                    <p className="text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">{uploadError}</p>
-                  )}
-                </div>
-              </>
+                {uploadError && (
+                  <p className="text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">{uploadError}</p>
+                )}
+              </div>
             )}
           </div>
         </section>
