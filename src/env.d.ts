@@ -56,6 +56,13 @@ interface Window {
     getClips: (episodeId: number) => Promise<Clip[]>
     createClip: (episodeId: number, startTime: number, endTime: number, title: string) => Promise<Clip>
     createClipsFromKeyMoments: (episodeId: number) => Promise<Clip[]>
+    updateClip: (clipId: number, startTime: number, endTime: number) => Promise<Clip>
+    setClipThumbnail: (clipId: number, filePath: string) => Promise<Clip>
+    setClipThumbnailFromFrame: (clipId: number, dataUrl: string) => Promise<Clip>
+    generateClipSummary: (clipId: number, options?: { provider?: 'claude' | 'openai' | 'gemini' }) => Promise<Clip>
+    updateClipSummary: (clipId: number, summary: string) => Promise<Clip>
+    updateClipTitle: (clipId: number, title: string) => Promise<Clip>
+    updateClipYouTubeId: (clipId: number, youtubeVideoId: string) => Promise<Clip>
     exportClip: (clipId: number) => Promise<{ success: boolean; filePath: string }>
     deleteClip: (clipId: number) => Promise<{ success: boolean }>
     deleteAllClips: (episodeId: number) => Promise<{ success: boolean }>
@@ -66,6 +73,8 @@ interface Window {
     revealInFinder: (filePath: string) => Promise<{ success: boolean }>
     getAppDataPath: () => Promise<string>
     openExternal: (url: string) => Promise<{ success: boolean }>
+    copyImageToClipboard: (filePath: string) => Promise<{ success: boolean }>
+    downloadFile: (filePath: string, defaultName?: string) => Promise<string | null>
 
     checkSetupComplete: () => Promise<boolean>
     shouldShowSetup: () => Promise<boolean>
@@ -80,7 +89,40 @@ interface Window {
     getSetting: (key: string) => Promise<string | null>
     setSetting: (key: string, value: unknown) => Promise<{ success: boolean }>
     getAllSettings: () => Promise<Record<string, string>>
+
+    // YouTube
+    getYouTubeStatus: () => Promise<{ clientId: string | null; connected: boolean; authChannelId: string | null; mainChannelId: string | null; cutsChannelId: string | null }>
+    saveYouTubeCredentials: (clientId: string, clientSecret: string) => Promise<{ success: boolean }>
+    connectYouTube: () => Promise<{ success: boolean; channels: YouTubeChannel[] }>
+    disconnectYouTube: () => Promise<{ success: boolean }>
+    listYouTubeChannels: () => Promise<YouTubeChannel[]>
+    resolveYouTubeChannel: (channelId: string) => Promise<YouTubeChannel>
+    saveYouTubeChannelConfig: (mainChannelId: string, cutsChannelId: string) => Promise<{ success: boolean }>
+    connectForChannel: (channelId: string) => Promise<{ success: boolean }>
+    getChannelAuthStatus: (channelId: string) => Promise<{ authenticated: boolean }>
+    listRecentVideos: (channelId: string, query?: string) => Promise<YouTubeVideo[]>
+    uploadToYouTube: (opts: { filePath: string; title: string; description: string; channelId: string; thumbnailPath?: string; tags?: string[]; privacyStatus?: 'public' | 'unlisted' | 'private' }) => Promise<{ videoId: string; videoUrl: string }>
+    updateYouTubeVideoMetadata: (opts: { videoId: string; title: string; description: string; tags?: string[] }) => Promise<{ success: boolean; videoUrl: string }>
+    onYouTubeUploadProgress: (cb: (pct: number) => void) => () => void
+    onYouTubeAuthStarted: (cb: (url: string) => void) => () => void
+
+    // WordPress
+    publishToWordPress: (opts: { episodeId: number; title: string; content: string; slug?: string; status?: 'draft' | 'publish' }) => Promise<{ postId: number; postUrl: string }>
+    updateWordPressPost: (opts: { postId: number; title: string; content: string; slug?: string }) => Promise<{ postId: number; postUrl: string }>
   }
+}
+
+interface YouTubeChannel {
+  id: string
+  title: string
+  thumb: string | null
+}
+
+interface YouTubeVideo {
+  videoId: string
+  title: string
+  publishedAt: string
+  thumb: string | null
 }
 
 interface Episode {
@@ -133,4 +175,7 @@ interface Clip {
   title: string
   reason: string
   file_path: string
+  thumbnail_path: string
+  summary: string
+  youtube_video_id: string
 }

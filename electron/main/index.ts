@@ -15,6 +15,10 @@ const MEDIA_TYPES: Record<string, string> = {
   '.webm': 'video/webm',
   '.mkv': 'video/x-matroska',
   '.avi': 'video/x-msvideo',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
 }
 
 // Must be called synchronously before app is ready so Electron treats the
@@ -38,6 +42,8 @@ import { registerClipHandlers } from '../services/clipEngine'
 import { registerFileHandlers } from '../services/fileManager'
 import { registerWhisperSetupHandlers } from '../services/whisperSetup'
 import { registerFirstRunHandlers } from '../services/firstRunSetup'
+import { registerYouTubeHandlers } from '../services/youtubeService'
+import { registerWordPressHandlers } from '../services/wordpressService'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -131,6 +137,8 @@ app.whenReady().then(() => {
   registerFileHandlers(ipcMain)
   registerWhisperSetupHandlers(ipcMain)
   registerFirstRunHandlers()
+  registerYouTubeHandlers(ipcMain)
+  registerWordPressHandlers(ipcMain)
 
   createWindow()
 

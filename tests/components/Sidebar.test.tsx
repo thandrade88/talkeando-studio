@@ -3,10 +3,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 
-// useAppStore mock — Sidebar reads selectedEpisodeId
+// useAppStore mock — Sidebar reads transcribingEpisodeId
 vi.mock('../../src/store/useAppStore', () => ({
-  useAppStore: vi.fn((selector: (s: { selectedEpisodeId: number | null }) => unknown) =>
-    selector({ selectedEpisodeId: null })
+  useAppStore: vi.fn((selector: (s: { transcribingEpisodeId: number | null }) => unknown) =>
+    selector({ transcribingEpisodeId: null })
   ),
 }))
 
@@ -24,8 +24,8 @@ function renderSidebar(path = '/dashboard') {
 describe('Sidebar', () => {
   beforeEach(() => {
     vi.mocked(useAppStore).mockImplementation(
-      (selector: (s: { selectedEpisodeId: number | null }) => unknown) =>
-        selector({ selectedEpisodeId: null }) as never
+      (selector: (s: { transcribingEpisodeId: number | null }) => unknown) =>
+        selector({ transcribingEpisodeId: null }) as never
     )
   })
 
@@ -37,22 +37,18 @@ describe('Sidebar', () => {
 
   it('renders all navigation items', () => {
     renderSidebar()
-    expect(screen.getByText('Dashboard')).toBeDefined()
-    expect(screen.getByText('Transcrições')).toBeDefined()
-    expect(screen.getByText('Conteúdo IA')).toBeDefined()
-    expect(screen.getByText('Clipes')).toBeDefined()
-    expect(screen.getByText('Publicações')).toBeDefined()
+    expect(screen.getByText('Episódios')).toBeDefined()
     expect(screen.getByText('Configurações')).toBeDefined()
   })
 
   it('renders version string', () => {
     renderSidebar()
-    expect(screen.getByText(/Talkeando Studio v/)).toBeDefined()
+    expect(screen.getByText(/v0\.1\.0/)).toBeDefined()
   })
 
   it('links to /dashboard', () => {
     renderSidebar()
-    const link = screen.getByRole('link', { name: /Dashboard/i })
+    const link = screen.getByRole('link', { name: /Episódios/i })
     expect(link.getAttribute('href')).toBe('/dashboard')
   })
 
@@ -62,14 +58,13 @@ describe('Sidebar', () => {
     expect(link.getAttribute('href')).toBe('/settings')
   })
 
-  it('appends episode id to transcription link when one is selected', () => {
+  it('shows a transcribing indicator when an episode is being transcribed', () => {
     vi.mocked(useAppStore).mockImplementation(
-      (selector: (s: { selectedEpisodeId: number | null }) => unknown) =>
-        selector({ selectedEpisodeId: 7 }) as never
+      (selector: (s: { transcribingEpisodeId: number | null }) => unknown) =>
+        selector({ transcribingEpisodeId: 7 }) as never
     )
 
     renderSidebar()
-    const link = screen.getByRole('link', { name: /Transcrições/i })
-    expect(link.getAttribute('href')).toBe('/transcription/7')
+    expect(screen.getByText('Transcrevendo...')).toBeDefined()
   })
 })

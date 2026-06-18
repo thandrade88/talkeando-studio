@@ -97,8 +97,8 @@ export default function Clips() {
   const duration = selectedClip ? selectedClip.end_time - selectedClip.start_time : endTime - startTime
 
   return (
-    <div className="flex h-full">
-      <aside className="w-64 border-r border-border flex flex-col shrink-0 overflow-hidden">
+    <div className="flex h-full overflow-y-auto">
+      <aside className="w-64 border-r border-border flex flex-col shrink-0 overflow-y-auto">
         <div className="px-4 py-3 border-b border-border">
           <p className="text-sm font-medium">{clips.length} clipe(s)</p>
         </div>

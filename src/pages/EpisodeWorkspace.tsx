@@ -3,12 +3,22 @@ import { useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft, FileText, Sparkles, Scissors, Loader2, Clock,
   Save, Trash2, RefreshCw, ChevronDown, RotateCcw, Plus, Download, FolderOpen,
-  Send, Copy, Check, ExternalLink, Globe, CheckCircle2, Circle, Volume2,
+  Copy, Check, ExternalLink, Globe, CheckCircle2, Circle, Volume2, Image as ImageIcon, Camera,
+  MoveHorizontal, ZoomIn, Youtube, Upload, Settings, Search, X,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { cn, formatTimestamp, formatDuration } from '../lib/utils'
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
+
+function parseTimestamp(v: string): number | null {
+  const parts = v.trim().split(':').map(Number)
+  if (parts.some(isNaN)) return null
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
+  if (parts.length === 2) return parts[0] * 60 + parts[1]
+  if (parts.length === 1) return parts[0]
+  return null
+}
 
 function formatEta(s: number) {
   if (s < 10) return 'menos de 10s'
@@ -35,7 +45,7 @@ const STATUS_LABEL: Record<string, string> = {
   transcribed: 'Transcrito', ready: 'Pronto',
 }
 
-type Tab = 'transcricao' | 'conteudo' | 'clips' | 'publicar'
+type Tab = 'transcricao' | 'conteudo' | 'clips'
 
 // ─── Transcrição tab ──────────────────────────────────────────────────────────
 
@@ -112,7 +122,7 @@ function TranscriptionTab({
   const audioSrc = episode.audio_path ? `app-media://${episode.audio_path}` : null
 
   return (
-    <div className="flex flex-col flex-1 overflow-hidden">
+    <div className="flex flex-col flex-1 overflow-y-auto">
 
       {/* ── Pipeline steps ── */}
       <div className="px-6 py-5 border-b border-border shrink-0 space-y-5">
@@ -448,9 +458,9 @@ function ResumoTab({ episodeId, provider }: { episodeId: number; provider: Provi
         </button>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-y-auto">
         {/* left: summary text */}
-        <div className="flex flex-col w-80 shrink-0 border-r border-border overflow-hidden">
+        <div className="flex flex-col w-80 shrink-0 border-r border-border overflow-y-auto">
           <p className="px-4 py-2 text-xs font-medium text-muted-foreground border-b border-border uppercase tracking-wider">Resumo</p>
           <div className="flex-1 overflow-y-auto p-4">
             {summary
@@ -501,7 +511,7 @@ function ResumoTab({ episodeId, provider }: { episodeId: number; provider: Provi
 function ContentTab({ episodeId }: { episodeId: number }) {
   const navigate = useNavigate()
   const [contents, setContents]             = useState<GeneratedContent[]>([])
-  const [contentType, setContentType]       = useState('blog_post')
+  const [contentType, setContentType]       = useState('resumo')
   const [isGenerating, setIsGenerating]     = useState(false)
   const [aiStatus, setAiStatus]             = useState('')
   const [editContent, setEditContent]       = useState('')
@@ -528,6 +538,19 @@ function ContentTab({ episodeId }: { episodeId: number }) {
   const [igPromptSaved, setIgPromptSaved]       = useState(false)
   const defaultIgPromptRef = useRef<string>('')
 
+  // WordPress publishing
+  const [wpPostId, setWpPostId]             = useState<number | null>(null)
+  const [wpPublishing, setWpPublishing]     = useState(false)
+  const [wpResult, setWpResult]             = useState<string | null>(null)
+  const [wpError, setWpError]               = useState<string | null>(null)
+
+  // YouTube metadata update
+  const [ytVideoId, setYtVideoId]           = useState<string | null>(null)
+  const [ytUpdating, setYtUpdating]         = useState(false)
+  const [ytUpdated, setYtUpdated]           = useState(false)
+  const [ytError, setYtError]               = useState<string | null>(null)
+  const [copied, setCopied]                 = useState<string | null>(null)
+
   const activeContent = contents.find(c => c.type === contentType)
   function parseMeta(raw: string): { provider?: ProviderValue; model?: string } {
     try { return JSON.parse(raw) } catch { return {} }
@@ -535,6 +558,8 @@ function ContentTab({ episodeId }: { episodeId: number }) {
 
   useEffect(() => {
     window.api.getGeneratedContent(episodeId).then(setContents)
+    window.api.getSetting(`episode_${episodeId}_wp_post_id`).then(v => { if (v) setWpPostId(Number(v)) })
+    window.api.getSetting(`episode_${episodeId}_youtube_id`).then(v => { if (v) setYtVideoId(v) })
     window.api.getSetting('ai_provider').then(v => {
       if (v && ['claude', 'openai', 'gemini'].includes(v)) setProvider(v as ProviderValue)
       setProviderLoaded(true)
@@ -585,11 +610,59 @@ function ContentTab({ episodeId }: { episodeId: number }) {
     } finally { setIsSaving(false) }
   }
 
+  async function publishBlogPost() {
+    if (!activeContent || contentType !== 'blog_post') return
+    setWpPublishing(true); setWpError(null); setWpResult(null)
+    try {
+      let title = '', content = '', slug = ''
+      try {
+        const parsed = JSON.parse(activeContent.content)
+        title = parsed.seoTitle || parsed.title || ''
+        content = parsed.htmlContent || parsed.content || activeContent.content
+        slug = parsed.slug || ''
+      } catch {
+        content = activeContent.content
+      }
+      if (wpPostId) {
+        const r = await window.api.updateWordPressPost({ postId: wpPostId, title, content, slug })
+        setWpResult(r.postUrl)
+      } else {
+        const r = await window.api.publishToWordPress({ episodeId, title, content, slug, status: 'draft' })
+        setWpPostId(r.postId)
+        setWpResult(r.postUrl)
+      }
+    } catch (err) {
+      setWpError(err instanceof Error ? err.message : String(err))
+    } finally { setWpPublishing(false) }
+  }
+
+  async function updateYouTubeMetadata() {
+    if (!ytVideoId || !activeContent || contentType !== 'youtube') return
+    setYtUpdating(true); setYtError(null); setYtUpdated(false)
+    try {
+      await window.api.updateYouTubeVideoMetadata({
+        videoId: ytVideoId,
+        title:   '', // keep current title
+        description: activeContent.content,
+      })
+      setYtUpdated(true)
+      setTimeout(() => setYtUpdated(false), 3000)
+    } catch (err) {
+      setYtError(err instanceof Error ? err.message : String(err))
+    } finally { setYtUpdating(false) }
+  }
+
+  async function copyContent(text: string, key: string) {
+    await navigator.clipboard.writeText(text)
+    setCopied(key)
+    setTimeout(() => setCopied(null), 2000)
+  }
+
   const providerLabel = AI_PROVIDERS.find(p => p.value === provider)?.label ?? 'IA'
   const activeMeta    = activeContent ? parseMeta(activeContent.metadata) : null
 
   return (
-    <div className="flex flex-col flex-1 overflow-hidden" onClick={() => providerMenuOpen && setProviderMenuOpen(false)}>
+    <div className="flex flex-col flex-1 overflow-y-auto" onClick={() => providerMenuOpen && setProviderMenuOpen(false)}>
       {/* content-type sub-tabs + action buttons */}
       <div className="flex items-center border-b border-border shrink-0 px-4 gap-2">
         <div className="flex flex-1 items-end overflow-x-auto">
@@ -792,7 +865,7 @@ function ContentTab({ episodeId }: { episodeId: number }) {
       </div>}
 
       {contentType !== 'resumo' && (
-        <div className="flex-1 overflow-hidden flex flex-col px-6 py-4">
+        <div className="flex-1 overflow-y-auto flex flex-col px-6 py-4">
           {!activeContent && !isGenerating && (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
               <Sparkles className="w-10 h-10 opacity-20" />
@@ -807,8 +880,131 @@ function ContentTab({ episodeId }: { episodeId: number }) {
               placeholder="Conteúdo gerado aparecerá aqui..."
             />
           )}
+          {activeContent && (
+            <div className="flex items-center gap-2 pt-3 shrink-0">
+              <button onClick={() => copyContent(activeContent.content, contentType)}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary border border-border rounded-lg">
+                {copied === contentType ? <Check className="w-3 h-3 text-primary" /> : <Copy className="w-3 h-3" />}
+                {copied === contentType ? 'Copiado!' : 'Copiar'}
+              </button>
+              {contentType === 'blog_post' && (
+                <button onClick={publishBlogPost} disabled={wpPublishing}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg disabled:opacity-50">
+                  {wpPublishing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Globe className="w-3 h-3" />}
+                  {wpPostId ? 'Atualizar no WordPress' : 'Publicar no WordPress'}
+                </button>
+              )}
+              {contentType === 'youtube' && ytVideoId && (
+                <button onClick={updateYouTubeMetadata} disabled={ytUpdating}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg disabled:opacity-50">
+                  {ytUpdating
+                    ? <Loader2 className="w-3 h-3 animate-spin" />
+                    : ytUpdated
+                      ? <><Check className="w-3 h-3" />Atualizado!</>
+                      : <><Youtube className="w-3 h-3" />Atualizar no YouTube</>}
+                </button>
+              )}
+              {contentType === 'youtube' && !ytVideoId && (
+                <span className="text-xs text-muted-foreground">Vincule um vídeo na aba Transcrição para atualizar metadados.</span>
+              )}
+              {wpResult && (
+                <button onClick={() => window.api.openExternal(wpResult)}
+                  className="flex items-center gap-1 text-xs text-primary hover:underline">
+                  <ExternalLink className="w-3 h-3" />Ver post
+                </button>
+              )}
+              {wpError && <span className="text-xs text-destructive">{wpError}</span>}
+              {ytError && <span className="text-xs text-destructive">{ytError}</span>}
+            </div>
+          )}
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── Clip timeline ────────────────────────────────────────────────────────────
+
+function ClipTimeline({
+  duration, startTime, endTime, onStartChange, onEndChange, videoRef,
+}: {
+  duration: number
+  startTime: number
+  endTime: number
+  onStartChange: (t: number) => void
+  onEndChange: (t: number) => void
+  videoRef: React.RefObject<HTMLVideoElement | null>
+}) {
+  const trackRef = useRef<HTMLDivElement>(null)
+  const dragging  = useRef<'start' | 'end' | null>(null)
+  // Use refs so the mousemove handler never goes stale
+  const stateRef  = useRef({ startTime, endTime, duration })
+  stateRef.current = { startTime, endTime, duration }
+
+  useEffect(() => {
+    function getTime(clientX: number) {
+      if (!trackRef.current) return 0
+      const rect  = trackRef.current.getBoundingClientRect()
+      const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+      return ratio * stateRef.current.duration
+    }
+
+    function onMouseMove(e: MouseEvent) {
+      if (!dragging.current) return
+      const { startTime, endTime, duration } = stateRef.current
+      const raw = getTime(e.clientX)
+      if (dragging.current === 'start') {
+        const v = Math.round(Math.max(0, Math.min(raw, endTime - 1)) * 10) / 10
+        onStartChange(v)
+        if (videoRef.current) videoRef.current.currentTime = v
+      } else {
+        const v = Math.round(Math.max(startTime + 1, Math.min(raw, duration)) * 10) / 10
+        onEndChange(v)
+        if (videoRef.current) videoRef.current.currentTime = Math.max(0, v - 0.5)
+      }
+    }
+
+    function onMouseUp() { dragging.current = null }
+
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup',   onMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup',   onMouseUp)
+    }
+  }, [onStartChange, onEndChange, videoRef])
+
+  const max      = duration || 1
+  const startPct = (startTime / max) * 100
+  const endPct   = (endTime   / max) * 100
+
+  return (
+    <div
+      ref={trackRef}
+      className="relative h-8 select-none"
+      onMouseDown={e => e.preventDefault()}
+    >
+      {/* track */}
+      <div className="absolute top-1/2 -translate-y-1/2 inset-x-0 h-1.5 bg-secondary rounded-full" />
+      {/* active region */}
+      <div
+        className="absolute top-1/2 -translate-y-1/2 h-1.5 bg-primary/50 rounded-full"
+        style={{ left: `${startPct}%`, right: `${100 - endPct}%` }}
+      />
+      {/* start handle */}
+      <div
+        title={`Início: ${formatTimestamp(startTime)}`}
+        className="absolute top-1/2 w-4 h-4 rounded-full bg-primary border-2 border-white shadow-md cursor-grab z-10"
+        style={{ left: `${startPct}%`, transform: 'translate(-50%, -50%)' }}
+        onMouseDown={() => { dragging.current = 'start' }}
+      />
+      {/* end handle */}
+      <div
+        title={`Fim: ${formatTimestamp(endTime)}`}
+        className="absolute top-1/2 w-4 h-4 rounded-full bg-orange-500 border-2 border-white shadow-md cursor-grab z-10"
+        style={{ left: `${endPct}%`, transform: 'translate(-50%, -50%)' }}
+        onMouseDown={() => { dragging.current = 'end' }}
+      />
     </div>
   )
 }
@@ -826,10 +1022,215 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
   const [isImporting, setIsImporting]     = useState(false)
   const [importMsg, setImportMsg]         = useState<string | null>(null)
 
-  const selected = clips.find(c => c.id === selectedId)
+  // Editable clip bounds
+  const [editStart, setEditStart]         = useState(0)
+  const [editEnd, setEditEnd]             = useState(30)
+  const [isSavingClip, setIsSavingClip]   = useState(false)
+  const [mediaDuration, setMediaDuration] = useState(episode.duration || 0)
+  const videoRef = useRef<HTMLVideoElement>(null)
 
-  useEffect(() => { window.api.getClips(episodeId).then(setClips) }, [episodeId])
+  // Vertical (9:16) preview, manually recentered on the speaker
+  const verticalVideoRef = useRef<HTMLVideoElement>(null)
+  const [vCropX, setVCropX] = useState(50)
+  const [vZoom, setVZoom]   = useState(1)
+
+  // Thumbnail upload
+  const [isSettingThumb, setIsSettingThumb] = useState(false)
+  const [isCapturingFrame, setIsCapturingFrame] = useState(false)
+  const [thumbCopied, setThumbCopied]       = useState(false)
+  const [thumbError, setThumbError]         = useState<string | null>(null)
+
+  // Clip title
+  const [titleDraft, setTitleDraft]         = useState('')
+  const [isSavingTitle, setIsSavingTitle]   = useState(false)
+
+  // Clip summary
+  const [summaryDraft, setSummaryDraft]     = useState('')
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false)
+  const [isSavingSummary, setIsSavingSummary] = useState(false)
+  const [summaryError, setSummaryError]     = useState<string | null>(null)
+
+  // YouTube upload
+  const [ytCutsChId, setYtCutsChId]         = useState<string | null>(null)
+  const [ytConnected, setYtConnected]       = useState(false)
+  const [uploading, setUploading]           = useState<number | null>(null)
+  const [uploadPct, setUploadPct]           = useState(0)
+  const [uploadedUrls, setUploadedUrls]     = useState<Record<number, string>>({})
+  const [uploadError, setUploadError]       = useState<string | null>(null)
+  const [privacyStatus, setPrivacyStatus]   = useState<'private' | 'unlisted' | 'public'>('private')
+
+  const selected    = clips.find(c => c.id === selectedId)
+  const isDirtyClip = selected && (editStart !== selected.start_time || editEnd !== selected.end_time)
+
+  useEffect(() => {
+    window.api.getClips(episodeId).then(loaded => {
+      setClips(loaded)
+      const urls: Record<number, string> = {}
+      for (const c of loaded) {
+        if (c.youtube_video_id) urls[c.id] = `https://youtu.be/${c.youtube_video_id}`
+      }
+      setUploadedUrls(urls)
+    })
+  }, [episodeId])
   useEffect(() => window.api.onClipProgress(p => setExportProgress(p)), [])
+
+  useEffect(() => {
+    window.api.getYouTubeStatus().then(s => {
+      setYtConnected(s.connected)
+      if (s.cutsChannelId) setYtCutsChId(s.cutsChannelId)
+    })
+    return window.api.onYouTubeUploadProgress(pct => setUploadPct(pct))
+  }, [])
+
+  async function uploadClip(clip: Clip) {
+    if (!ytCutsChId || !clip.file_path) return
+    if (!clip.thumbnail_path) {
+      setUploadError('Selecione uma thumbnail antes de publicar o clipe.')
+      return
+    }
+    setUploading(clip.id); setUploadPct(0); setUploadError(null)
+    try {
+      const result = await window.api.uploadToYouTube({
+        filePath:      clip.file_path,
+        title:         clip.title,
+        description:   clip.summary ?? '',
+        channelId:     ytCutsChId,
+        thumbnailPath: clip.thumbnail_path,
+        privacyStatus,
+      })
+      setUploadedUrls(prev => ({ ...prev, [clip.id]: result.videoUrl }))
+      const updated = await window.api.updateClipYouTubeId(clip.id, result.videoId)
+      setClips(prev => prev.map(c => c.id === updated.id ? updated : c))
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setUploading(null)
+    }
+  }
+
+  // Reset edit state and seek video when selected clip changes
+  useEffect(() => {
+    if (!selected) return
+    setEditStart(selected.start_time)
+    setEditEnd(selected.end_time)
+    setThumbError(null)
+    setTitleDraft(selected.title ?? '')
+    setSummaryDraft(selected.summary ?? ''); setSummaryError(null)
+    setVCropX(50); setVZoom(1)
+    setTimeout(() => {
+      if (videoRef.current) videoRef.current.currentTime = selected.start_time
+      if (verticalVideoRef.current) verticalVideoRef.current.currentTime = selected.start_time
+    }, 50)
+  }, [selectedId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function saveClipBounds() {
+    if (!selected) return
+    setIsSavingClip(true)
+    try {
+      const updated = await window.api.updateClip(selected.id, editStart, editEnd)
+      setClips(prev => prev.map(c => c.id === updated.id ? updated : c))
+    } catch (err) {
+      alert(`Erro ao salvar: ${err}`)
+    } finally {
+      setIsSavingClip(false)
+    }
+  }
+
+  async function saveClipTitle() {
+    if (!selected || titleDraft === selected.title) return
+    setIsSavingTitle(true)
+    try {
+      const updated = await window.api.updateClipTitle(selected.id, titleDraft)
+      setClips(prev => prev.map(c => c.id === updated.id ? updated : c))
+    } catch (err) {
+      alert(`Erro ao salvar título: ${err}`)
+    } finally { setIsSavingTitle(false) }
+  }
+
+  async function chooseThumbnail() {
+    if (!selected) return
+    setThumbError(null)
+    const filePath = await window.api.openFileDialog([
+      { name: 'Imagens', extensions: ['jpg', 'jpeg', 'png', 'webp'] }
+    ])
+    if (!filePath) return
+    setIsSettingThumb(true)
+    try {
+      const updated = await window.api.setClipThumbnail(selected.id, filePath)
+      setClips(prev => prev.map(c => c.id === updated.id ? updated : c))
+    } catch (err) {
+      setThumbError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setIsSettingThumb(false)
+    }
+  }
+
+  async function captureCurrentFrame() {
+    if (!selected || !videoRef.current) return
+    setThumbError(null)
+    setIsCapturingFrame(true)
+    try {
+      const dataUrl = await window.api.extractFrame(episode.file_path, videoRef.current.currentTime)
+      if (!dataUrl) throw new Error('Não foi possível capturar o frame atual.')
+      const updated = await window.api.setClipThumbnailFromFrame(selected.id, dataUrl)
+      setClips(prev => prev.map(c => c.id === updated.id ? updated : c))
+    } catch (err) {
+      setThumbError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setIsCapturingFrame(false)
+    }
+  }
+
+  async function copyThumbnail() {
+    if (!selected?.thumbnail_path) return
+    setThumbError(null)
+    try {
+      await window.api.copyImageToClipboard(selected.thumbnail_path)
+      setThumbCopied(true)
+      setTimeout(() => setThumbCopied(false), 2000)
+    } catch (err) {
+      setThumbError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function downloadThumbnail() {
+    if (!selected?.thumbnail_path) return
+    setThumbError(null)
+    try {
+      const safeName = selected.title.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '_')
+      await window.api.downloadFile(selected.thumbnail_path, `${safeName}_thumb.jpg`)
+    } catch (err) {
+      setThumbError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function generateSummary() {
+    if (!selected) return
+    setIsGeneratingSummary(true); setSummaryError(null)
+    try {
+      const updated = await window.api.generateClipSummary(selected.id)
+      setClips(prev => prev.map(c => c.id === updated.id ? updated : c))
+      setTitleDraft(updated.title ?? '')
+      setSummaryDraft(updated.summary ?? '')
+    } catch (err) {
+      setSummaryError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setIsGeneratingSummary(false)
+    }
+  }
+
+  async function saveSummary() {
+    if (!selected) return
+    setIsSavingSummary(true)
+    try {
+      const updated = await window.api.updateClipSummary(selected.id, summaryDraft)
+      setClips(prev => prev.map(c => c.id === updated.id ? updated : c))
+    } catch (err) {
+      setSummaryError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setIsSavingSummary(false)
+    }
+  }
 
   async function importFromResume() {
     setIsImporting(true); setImportMsg(null)
@@ -872,9 +1273,9 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
   }
 
   return (
-    <div className="flex flex-1 overflow-hidden">
+    <div className="flex flex-1 overflow-y-auto">
       {/* clip list */}
-      <aside className="w-60 border-r border-border flex flex-col shrink-0 overflow-hidden">
+      <aside className="w-60 border-r border-border flex flex-col shrink-0 overflow-y-auto">
         <div className="px-3 py-3 border-b border-border shrink-0 space-y-2">
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium text-muted-foreground">{clips.length} clipe(s)</p>
@@ -935,14 +1336,16 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
           />
           <div className="flex gap-1.5">
             <div className="flex-1">
-              <p className="text-xs text-muted-foreground mb-0.5">Início (s)</p>
-              <input type="number" value={startTime} onChange={e => setStartTime(parseFloat(e.target.value))} step="0.1" min="0"
-                className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs focus:outline-none" />
+              <p className="text-xs text-muted-foreground mb-0.5">Início</p>
+              <input type="text" value={formatTimestamp(startTime)}
+                onChange={e => { const v = parseTimestamp(e.target.value); if (v !== null) setStartTime(v) }}
+                className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs font-mono focus:outline-none" />
             </div>
             <div className="flex-1">
-              <p className="text-xs text-muted-foreground mb-0.5">Fim (s)</p>
-              <input type="number" value={endTime} onChange={e => setEndTime(parseFloat(e.target.value))} step="0.1" min="0"
-                className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs focus:outline-none" />
+              <p className="text-xs text-muted-foreground mb-0.5">Fim</p>
+              <input type="text" value={formatTimestamp(endTime)}
+                onChange={e => { const v = parseTimestamp(e.target.value); if (v !== null) setEndTime(v) }}
+                className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs font-mono focus:outline-none" />
             </div>
           </div>
           <button onClick={createClip} disabled={!newTitle.trim()}
@@ -954,18 +1357,25 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
       </aside>
 
       {/* clip detail */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-y-auto">
         {selected ? (
           <>
             <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
               <div>
                 <p className="text-sm font-semibold">{selected.title}</p>
                 <p className="text-xs text-muted-foreground">
-                  {formatTimestamp(selected.start_time)} → {formatTimestamp(selected.end_time)}
-                  {' · '}{formatTimestamp(selected.end_time - selected.start_time)}
+                  {formatTimestamp(editStart)} → {formatTimestamp(editEnd)}
+                  {' · '}{formatDuration(editEnd - editStart)}
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                {isDirtyClip && (
+                  <button onClick={saveClipBounds} disabled={isSavingClip}
+                    className="flex items-center gap-1.5 text-sm px-3 py-1.5 bg-primary hover:bg-primary/90 text-white rounded-md disabled:opacity-50">
+                    {isSavingClip ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                    Salvar
+                  </button>
+                )}
                 {selected.file_path && (
                   <button onClick={() => window.api.revealInFinder(selected.file_path)}
                     className="flex items-center gap-1.5 text-sm px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded-md">
@@ -973,31 +1383,263 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
                   </button>
                 )}
                 <button onClick={() => exportClip(selected.id)} disabled={isExporting}
-                  className="flex items-center gap-2 bg-primary hover:bg-primary/90 text-white text-sm px-4 py-2 rounded-md disabled:opacity-50">
+                  className="flex items-center gap-2 bg-secondary hover:bg-secondary/80 border border-border text-sm px-4 py-2 rounded-md disabled:opacity-50">
                   {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                   {isExporting ? `Exportando ${exportProgress}%` : 'Exportar'}
                 </button>
+                {ytConnected && ytCutsChId && (
+                  uploadedUrls[selected.id] ? (
+                    <button onClick={() => window.api.openExternal(uploadedUrls[selected.id])}
+                      className="flex items-center gap-1.5 text-sm px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-md">
+                      <ExternalLink className="w-3.5 h-3.5" />YouTube
+                    </button>
+                  ) : (
+                    <button onClick={() => uploadClip(selected)}
+                      disabled={uploading === selected.id || !selected.file_path || !selected.thumbnail_path}
+                      title={!selected.file_path ? 'Exporte o clipe antes de publicar' : !selected.thumbnail_path ? 'Selecione uma thumbnail antes de publicar' : undefined}
+                      className="flex items-center gap-1.5 text-sm px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-md disabled:opacity-50">
+                      {uploading === selected.id
+                        ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />{uploadPct}%</>
+                        : <><Upload className="w-3.5 h-3.5" />Upload</>}
+                    </button>
+                  )
+                )}
+                {ytConnected && ytCutsChId && (
+                  <select value={privacyStatus} onChange={e => setPrivacyStatus(e.target.value as typeof privacyStatus)}
+                    className="text-xs bg-secondary border border-border rounded-md px-2 py-1.5 focus:outline-none">
+                    <option value="private">Privado</option>
+                    <option value="unlisted">Não listado</option>
+                    <option value="public">Público</option>
+                  </select>
+                )}
               </div>
             </div>
-            <div className="flex-1 flex items-center justify-center p-6">
-              <div className="w-full max-w-lg space-y-4">
-                <div className="aspect-video bg-black rounded-xl border border-border flex items-center justify-center overflow-hidden">
+            {uploadError && (
+              <p className="px-6 py-2 text-xs text-destructive bg-destructive/10 shrink-0">{uploadError}</p>
+            )}
+            <div className="flex-1 overflow-y-auto p-5">
+              <div className="grid grid-cols-[7fr_3fr] gap-4 h-full">
+
+                {/* ── Left: editing area (60%) ── */}
+                <div className="flex flex-col gap-4 min-w-0">
+
+                  {/* main player */}
                   {episode.file_path.match(/\.(mp4|mov|avi|mkv|webm)$/i) ? (
-                    <video src={`app-media://${episode.file_path}#t=${selected.start_time},${selected.end_time}`} controls className="w-full h-full" />
+                    <div className="aspect-video bg-black rounded-xl border border-border overflow-hidden">
+                      <video
+                        ref={videoRef}
+                        src={`app-media://${episode.file_path}`}
+                        controls
+                        className="w-full h-full"
+                        onLoadedMetadata={e => setMediaDuration(e.currentTarget.duration || episode.duration || 0)}
+                        onPlay={() => verticalVideoRef.current?.play().catch(() => {})}
+                        onPause={() => verticalVideoRef.current?.pause()}
+                        onSeeked={e => { if (verticalVideoRef.current) verticalVideoRef.current.currentTime = e.currentTarget.currentTime }}
+                        onTimeUpdate={e => {
+                          const t = e.currentTarget.currentTime
+                          if (verticalVideoRef.current && Math.abs(verticalVideoRef.current.currentTime - t) > 0.3)
+                            verticalVideoRef.current.currentTime = t
+                        }}
+                      />
+                    </div>
                   ) : (
-                    <div className="text-center text-muted-foreground p-6">
-                      <Scissors className="w-12 h-12 mx-auto mb-2 opacity-30" />
-                      <audio src={`app-media://${episode.file_path}`} controls className="w-full mt-3" />
+                    <div className="aspect-video bg-black rounded-xl border border-border flex items-center justify-center">
+                      <div className="text-center text-muted-foreground p-6 w-full">
+                        <Scissors className="w-12 h-12 mx-auto mb-2 opacity-30" />
+                        <audio src={`app-media://${episode.file_path}`} controls className="w-full mt-3" />
+                      </div>
                     </div>
                   )}
-                </div>
-                <div className="grid grid-cols-3 gap-3 text-center">
-                  {[['Início', selected.start_time], ['Fim', selected.end_time], ['Duração', selected.end_time - selected.start_time]].map(([label, t]) => (
-                    <div key={String(label)} className="bg-card border border-border rounded-lg p-3">
-                      <p className="text-xs text-muted-foreground">{label}</p>
-                      <p className="text-sm font-mono mt-0.5">{formatTimestamp(Number(t))}</p>
+
+                  {/* trim controls */}
+                  <div className="bg-card border border-border rounded-xl p-4 space-y-4">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Corte do clipe</p>
+                    <ClipTimeline
+                      duration={mediaDuration}
+                      startTime={editStart}
+                      endTime={editEnd}
+                      onStartChange={setEditStart}
+                      onEndChange={setEditEnd}
+                      videoRef={videoRef}
+                    />
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <p className="text-xs text-muted-foreground mb-1.5 flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-primary inline-block" />Início
+                        </p>
+                        <input
+                          type="text" value={formatTimestamp(editStart)}
+                          onChange={e => {
+                            const v = parseTimestamp(e.target.value)
+                            if (v !== null && v < editEnd) { setEditStart(v); if (videoRef.current) videoRef.current.currentTime = v }
+                          }}
+                          className="w-full bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-primary/50"
+                        />
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground mb-1.5 flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-orange-500 inline-block" />Fim
+                        </p>
+                        <input
+                          type="text" value={formatTimestamp(editEnd)}
+                          onChange={e => {
+                            const v = parseTimestamp(e.target.value)
+                            if (v !== null && v > editStart) { setEditEnd(v); if (videoRef.current) videoRef.current.currentTime = Math.max(0, v - 0.5) }
+                          }}
+                          className="w-full bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-primary/50"
+                        />
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground mb-1.5">Duração</p>
+                        <p className="px-3 py-1.5 text-sm font-mono text-muted-foreground bg-secondary/50 rounded-lg border border-border">
+                          {formatDuration(editEnd - editStart)}
+                        </p>
+                      </div>
                     </div>
-                  ))}
+                  </div>
+
+                  {/* title */}
+                  <div className="bg-card border border-border rounded-xl p-4 space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Título do clipe</p>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={titleDraft}
+                        onChange={e => setTitleDraft(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') saveClipTitle() }}
+                        className="flex-1 bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary/50"
+                      />
+                      {titleDraft !== selected.title && (
+                        <button onClick={saveClipTitle} disabled={isSavingTitle}
+                          className="flex items-center gap-1.5 px-3 py-2 text-xs bg-primary hover:bg-primary/90 text-white rounded-lg disabled:opacity-50">
+                          {isSavingTitle ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                          Salvar
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* summary */}
+                  <div className="bg-card border border-border rounded-xl p-4 space-y-3 flex-1 flex flex-col">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                      <FileText className="w-3.5 h-3.5" />Resumo do clipe (IA)
+                    </p>
+                    <textarea
+                      value={summaryDraft}
+                      placeholder="Gere um resumo com IA ou escreva o seu…"
+                      onChange={e => setSummaryDraft(e.target.value)}
+                      className="flex-1 min-h-[120px] w-full bg-secondary border border-border rounded-lg px-3 py-2.5 text-sm leading-relaxed focus:outline-none focus:border-primary/50 resize-none"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={generateSummary} disabled={isGeneratingSummary}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs bg-secondary hover:bg-secondary/80 border border-border rounded-lg disabled:opacity-50"
+                      >
+                        {isGeneratingSummary ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                        {isGeneratingSummary ? 'Gerando…' : selected.summary ? 'Regenerar' : 'Gerar com IA'}
+                      </button>
+                      {summaryDraft !== (selected.summary ?? '') && (
+                        <button
+                          onClick={saveSummary} disabled={isSavingSummary}
+                          className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs bg-primary hover:bg-primary/90 text-white rounded-lg disabled:opacity-50"
+                        >
+                          {isSavingSummary ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                          Salvar
+                        </button>
+                      )}
+                    </div>
+                    {summaryError && <p className="text-xs text-destructive">{summaryError}</p>}
+                  </div>
+                </div>
+
+                {/* ── Right: metadata sidebar ── */}
+                {/* ── Right: metadata sidebar (40%) ── */}
+                <div className="flex flex-col gap-4">
+
+                  {/* 9:16 preview */}
+                  {episode.file_path.match(/\.(mp4|mov|avi|mkv|webm)$/i) && (
+                    <div className="bg-card border border-border rounded-xl p-3 space-y-3">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Preview 9:16</p>
+                      <div className="aspect-[9/16] bg-black rounded-lg border border-border overflow-hidden">
+                        <video
+                          ref={verticalVideoRef}
+                          src={`app-media://${episode.file_path}`}
+                          muted playsInline
+                          className="w-full h-full object-cover"
+                          style={{ objectPosition: `${vCropX}% center`, transform: `scale(${vZoom})` }}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                            <span className="flex items-center gap-1"><MoveHorizontal className="w-3 h-3" />Posição</span>
+                            <span className="font-mono tabular-nums">{vCropX}%</span>
+                          </div>
+                          <input type="range" min={0} max={100} value={vCropX}
+                            onChange={e => setVCropX(Number(e.target.value))}
+                            className="w-full accent-primary" />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                            <span className="flex items-center gap-1"><ZoomIn className="w-3 h-3" />Zoom</span>
+                            <span className="font-mono tabular-nums">{vZoom.toFixed(1)}x</span>
+                          </div>
+                          <input type="range" min={100} max={200} value={vZoom * 100}
+                            onChange={e => setVZoom(Number(e.target.value) / 100)}
+                            className="w-full accent-primary" />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* thumbnail */}
+                  <div className="bg-card border border-border rounded-xl p-3 space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                      <ImageIcon className="w-3.5 h-3.5" />Thumbnail
+                    </p>
+                    {selected.thumbnail_path ? (
+                      <>
+                        <img
+                          src={`app-media://${selected.thumbnail_path}?t=${selected.thumbnail_path}`}
+                          alt="Thumbnail"
+                          className="w-full aspect-video object-cover rounded-lg border border-border"
+                        />
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button onClick={copyThumbnail}
+                            className="flex items-center justify-center gap-1 py-1.5 text-xs bg-secondary hover:bg-secondary/80 border border-border rounded-lg">
+                            {thumbCopied ? <Check className="w-3 h-3 text-primary" /> : <Copy className="w-3 h-3" />}
+                            {thumbCopied ? 'Copiado!' : 'Copiar'}
+                          </button>
+                          <button onClick={downloadThumbnail}
+                            className="flex items-center justify-center gap-1 py-1.5 text-xs bg-secondary hover:bg-secondary/80 border border-border rounded-lg">
+                            <Download className="w-3 h-3" />Baixar
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="w-full aspect-video rounded-lg border border-dashed border-border flex items-center justify-center text-muted-foreground/40">
+                        <ImageIcon className="w-8 h-8" />
+                      </div>
+                    )}
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {episode.file_path.match(/\.(mp4|mov|avi|mkv|webm)$/i) && (
+                        <button onClick={captureCurrentFrame} disabled={isCapturingFrame}
+                          className="flex items-center justify-center gap-1 py-1.5 text-xs bg-secondary hover:bg-secondary/80 border border-border rounded-lg disabled:opacity-50">
+                          {isCapturingFrame ? <Loader2 className="w-3 h-3 animate-spin" /> : <Camera className="w-3 h-3" />}
+                          {isCapturingFrame ? '…' : 'Frame'}
+                        </button>
+                      )}
+                      <button onClick={chooseThumbnail} disabled={isSettingThumb}
+                        className={cn(
+                          'flex items-center justify-center gap-1 py-1.5 text-xs bg-secondary hover:bg-secondary/80 border border-border rounded-lg disabled:opacity-50',
+                          !episode.file_path.match(/\.(mp4|mov|avi|mkv|webm)$/i) && 'col-span-2'
+                        )}>
+                        {isSettingThumb ? <Loader2 className="w-3 h-3 animate-spin" /> : <ImageIcon className="w-3 h-3" />}
+                        {isSettingThumb ? '…' : selected.thumbnail_path ? 'Trocar' : 'Selecionar'}
+                      </button>
+                    </div>
+                    {thumbError && <p className="text-xs text-destructive">{thumbError}</p>}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1008,151 +1650,6 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
             <p className="text-sm">Selecione ou crie um clipe</p>
           </div>
         )}
-      </div>
-    </div>
-  )
-}
-
-// ─── Publicar tab ────────────────────────────────────────────────────────────
-
-const PLATFORMS = [
-  {
-    key: 'youtube',
-    label: 'YouTube',
-    color: 'text-red-500',
-    bg: 'bg-red-500/10 border-red-500/20',
-    url: 'https://studio.youtube.com/',
-    urlLabel: 'Abrir YouTube Studio',
-    hint: 'Cole o título e a descrição ao fazer upload do vídeo.',
-  },
-  {
-    key: 'instagram',
-    label: 'Instagram',
-    color: 'text-pink-500',
-    bg: 'bg-pink-500/10 border-pink-500/20',
-    url: 'https://www.instagram.com/',
-    urlLabel: 'Abrir Instagram',
-    hint: 'Cole a legenda na criação do post ou Reels.',
-  },
-  {
-    key: 'blog_post',
-    label: 'WordPress / Blog',
-    color: 'text-blue-400',
-    bg: 'bg-blue-500/10 border-blue-500/20',
-    url: null,
-    urlLabel: 'Abrir WordPress',
-    hint: 'Publique no seu blog ou WordPress.',
-  },
-]
-
-function PublishTab({ episodeId, onGoToContent }: { episodeId: number; onGoToContent: () => void }) {
-  const [contents, setContents] = useState<GeneratedContent[]>([])
-  const [wpUrl, setWpUrl]       = useState<string | null>(null)
-  const [copied, setCopied]     = useState<string | null>(null)
-
-  useEffect(() => {
-    window.api.getGeneratedContent(episodeId).then(setContents)
-    window.api.getSetting('wordpress_url').then(setWpUrl)
-  }, [episodeId])
-
-  async function copy(text: string, key: string) {
-    await navigator.clipboard.writeText(text)
-    setCopied(key)
-    setTimeout(() => setCopied(null), 2000)
-  }
-
-  function openUrl(url: string) {
-    window.api.openExternal(url)
-  }
-
-  return (
-    <div className="flex-1 overflow-y-auto p-6">
-      <div className="max-w-3xl mx-auto space-y-4">
-        <p className="text-xs text-muted-foreground mb-4">
-          Copie o conteúdo gerado e publique em cada plataforma. Gere o conteúdo primeiro na aba <strong className="text-foreground">Conteúdo</strong>.
-        </p>
-
-        {PLATFORMS.map(platform => {
-          const content = contents.find(c => c.type === platform.key)
-          const resolvedUrl = platform.key === 'blog_post' ? (wpUrl || null) : platform.url
-
-          return (
-            <div key={platform.key} className="bg-card border border-border rounded-xl overflow-hidden">
-              {/* card header */}
-              <div className={cn('flex items-center justify-between px-4 py-3 border-b border-border', content ? '' : 'opacity-60')}>
-                <div className="flex items-center gap-2">
-                  <div className={cn('w-2 h-2 rounded-full', content ? platform.color.replace('text-', 'bg-') : 'bg-muted-foreground/30')} />
-                  <span className={cn('text-sm font-semibold', content ? platform.color : 'text-muted-foreground')}>
-                    {platform.label}
-                  </span>
-                  {content && <span className="text-xs text-muted-foreground">· pronto</span>}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {content && (
-                    <button
-                      onClick={() => copy(content.content, platform.key)}
-                      className={cn(
-                        'flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md transition-colors border',
-                        copied === platform.key
-                          ? 'bg-primary/20 text-primary border-primary/30'
-                          : 'bg-secondary hover:bg-secondary/80 border-border'
-                      )}
-                    >
-                      {copied === platform.key ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                      {copied === platform.key ? 'Copiado!' : 'Copiar'}
-                    </button>
-                  )}
-
-                  {content && resolvedUrl && (
-                    <button
-                      onClick={() => openUrl(resolvedUrl)}
-                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-primary hover:bg-primary/90 text-white transition-colors"
-                    >
-                      <ExternalLink className="w-3 h-3" />
-                      {platform.urlLabel}
-                    </button>
-                  )}
-
-                  {content && platform.key === 'blog_post' && !wpUrl && (
-                    <button
-                      onClick={() => window.api.openExternal('https://wordpress.org/').then(() => {})}
-                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-secondary hover:bg-secondary/80 border border-border text-muted-foreground"
-                    >
-                      <Globe className="w-3 h-3" />
-                      Configure URL em Configurações
-                    </button>
-                  )}
-
-                  {!content && (
-                    <button
-                      onClick={onGoToContent}
-                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-secondary hover:bg-secondary/80 border border-border text-muted-foreground transition-colors"
-                    >
-                      <Sparkles className="w-3 h-3" />
-                      Gerar conteúdo
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* content preview */}
-              {content ? (
-                <div className="px-4 py-3">
-                  <p className="text-xs text-muted-foreground mb-2">{platform.hint}</p>
-                  <pre className="text-xs font-mono text-foreground/80 whitespace-pre-wrap leading-relaxed max-h-36 overflow-y-auto bg-secondary/40 rounded-lg px-3 py-2 scrollbar-thin">
-                    {content.content.slice(0, 600)}{content.content.length > 600 ? '\n...' : ''}
-                  </pre>
-                </div>
-              ) : (
-                <div className="px-4 py-4 text-center text-muted-foreground/50">
-                  <p className="text-xs">Conteúdo não gerado ainda</p>
-                </div>
-              )}
-            </div>
-          )
-        })}
-
       </div>
     </div>
   )
@@ -1177,6 +1674,19 @@ export default function EpisodeWorkspace() {
   const [txProgress, setTxProgress]   = useState(0)
   const [txStatus, setTxStatus]       = useState('')
   const [txEta, setTxEta]             = useState<string | null>(null)
+
+  const [ytVideos, setYtVideos]       = useState<YouTubeVideo[]>([])
+  const [ytVideoId, setYtVideoId]     = useState('')
+  const [ytSelectedVideo, setYtSelectedVideo] = useState<YouTubeVideo | null>(null)
+  const [ytLoading, setYtLoading]     = useState(false)
+  const [ytConnected, setYtConnected] = useState(false)
+  const [ytMainChId, setYtMainChId]   = useState<string | null>(null)
+  const [ytSaved, setYtSaved]         = useState(false)
+  const [ytSearch, setYtSearch]       = useState('')
+  const [ytDropOpen, setYtDropOpen]   = useState(false)
+  const [ytSearching, setYtSearching] = useState(false)
+  const ytSearchRef = useRef<HTMLDivElement>(null)
+  const ytDebounceRef = useRef<ReturnType<typeof setTimeout>>()
 
   useEffect(() => {
     if (!episodeId) return
@@ -1205,6 +1715,50 @@ export default function EpisodeWorkspace() {
     })
   }, [episodeId, transcriptionStartedAt])
 
+  useEffect(() => {
+    if (!episodeId) return
+    window.api.getYouTubeStatus().then(async s => {
+      setYtConnected(s.connected)
+      if (s.mainChannelId) setYtMainChId(s.mainChannelId)
+      if (!s.connected || !s.mainChannelId) return
+      setYtLoading(true)
+      try {
+        const videos = await window.api.listRecentVideos(s.mainChannelId)
+        setYtVideos(videos)
+        const savedId = await window.api.getSetting(`episode_${episodeId}_youtube_id`)
+        if (savedId) {
+          setYtVideoId(savedId)
+          const match = videos.find(v => v.videoId === savedId)
+          if (match) {
+            setYtSelectedVideo(match)
+          } else {
+            const results = await window.api.listRecentVideos(s.mainChannelId, savedId)
+            const found = results.find(v => v.videoId === savedId)
+            if (found) setYtSelectedVideo(found)
+            else setYtSelectedVideo({ videoId: savedId, title: savedId, publishedAt: '', thumb: null })
+          }
+        }
+      } catch {}
+      finally { setYtLoading(false) }
+    })
+  }, [episodeId])
+
+  useEffect(() => {
+    if (!ytMainChId) return
+    clearTimeout(ytDebounceRef.current)
+    if (!ytSearch.trim()) {
+      setYtSearching(true)
+      window.api.listRecentVideos(ytMainChId).then(setYtVideos).catch(() => {}).finally(() => setYtSearching(false))
+      return
+    }
+    setYtSearching(true)
+    ytDebounceRef.current = setTimeout(() => {
+      window.api.listRecentVideos(ytMainChId, ytSearch.trim())
+        .then(setYtVideos).catch(() => {}).finally(() => setYtSearching(false))
+    }, 400)
+    return () => clearTimeout(ytDebounceRef.current)
+  }, [ytSearch, ytMainChId])
+
   if (!episode || !episodeId) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
@@ -1223,8 +1777,15 @@ export default function EpisodeWorkspace() {
     { id: 'transcricao', label: 'Transcrição', icon: FileText },
     { id: 'conteudo',    label: 'Conteúdo',    icon: Sparkles },
     { id: 'clips',       label: 'Clips',        icon: Scissors },
-    { id: 'publicar',    label: 'Publicar',     icon: Send     },
   ]
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ytSearchRef.current && !ytSearchRef.current.contains(e.target as Node)) setYtDropOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
 
   return (
     <div className="flex flex-col h-full">
@@ -1251,6 +1812,104 @@ export default function EpisodeWorkspace() {
           {isTranscribing && <Loader2 className="inline ml-1 w-3 h-3 animate-spin" />}
         </span>
       </header>
+
+      {/* YouTube episode link */}
+      {ytConnected && ytMainChId && (
+        <div className="flex items-center gap-3 px-4 py-2 border-b border-border shrink-0">
+          <Youtube className="w-4 h-4 text-red-500 shrink-0" />
+          <div className="relative flex-1" ref={ytSearchRef}>
+            {ytVideoId && !ytDropOpen ? (
+              <div className="flex items-center gap-2 bg-secondary border border-border rounded-lg px-2 py-1 text-xs">
+                {ytSelectedVideo?.thumb && (
+                  <img src={ytSelectedVideo.thumb} alt="" className="w-10 h-6 rounded object-cover shrink-0 border border-border" />
+                )}
+                <span className="flex-1 truncate text-xs font-medium">
+                  {ytSelectedVideo?.title ?? ytVideoId}
+                </span>
+                <button onClick={() => { setYtDropOpen(true); setYtSearch('') }}
+                  className="text-muted-foreground hover:text-foreground shrink-0">
+                  <Search className="w-3 h-3" />
+                </button>
+                <button onClick={async () => {
+                  setYtVideoId(''); setYtSelectedVideo(null)
+                  if (episodeId) await window.api.setSetting(`episode_${episodeId}_youtube_id`, '')
+                }} className="text-muted-foreground hover:text-destructive shrink-0">
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center bg-secondary border border-border rounded-lg px-3 py-1.5 gap-2">
+                  <Search className="w-3 h-3 text-muted-foreground shrink-0" />
+                  <input
+                    type="text"
+                    value={ytSearch}
+                    onChange={e => { setYtSearch(e.target.value); setYtDropOpen(true) }}
+                    onFocus={() => setYtDropOpen(true)}
+                    placeholder="Buscar vídeo do YouTube…"
+                    className="flex-1 bg-transparent text-xs focus:outline-none placeholder:text-muted-foreground/50"
+                    autoFocus={ytDropOpen}
+                  />
+                  {ytSearch && (
+                    <button onClick={() => setYtSearch('')} className="text-muted-foreground hover:text-foreground shrink-0">
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+                {ytDropOpen && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto">
+                    {ytSearching && (
+                      <div className="flex items-center justify-center py-3">
+                        <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                      </div>
+                    )}
+                    {!ytSearching && ytVideos.map(v => (
+                        <button
+                          key={v.videoId}
+                          onClick={async () => {
+                            setYtVideoId(v.videoId)
+                            setYtSelectedVideo(v)
+                            setYtDropOpen(false)
+                            setYtSearch('')
+                            if (episodeId) {
+                              await window.api.setSetting(`episode_${episodeId}_youtube_id`, v.videoId)
+                              setYtSaved(true); setTimeout(() => setYtSaved(false), 2000)
+                            }
+                          }}
+                          className={cn(
+                            'flex items-center gap-3 w-full px-3 py-2 text-left hover:bg-secondary/80 transition-colors',
+                            v.videoId === ytVideoId && 'bg-primary/10'
+                          )}
+                        >
+                          {v.thumb && (
+                            <img src={v.thumb} alt="" className="w-16 h-9 rounded object-cover shrink-0 border border-border" />
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium truncate">{v.title}</p>
+                            <p className="text-[11px] text-muted-foreground">
+                              {new Date(v.publishedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                            </p>
+                          </div>
+                        </button>
+                      ))}
+                    {!ytSearching && ytVideos.length === 0 && (
+                      <p className="px-3 py-3 text-xs text-muted-foreground text-center">Nenhum vídeo encontrado</p>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+          {ytSaved && <Check className="w-3.5 h-3.5 text-primary shrink-0" />}
+          {ytVideoId && !ytDropOpen && (
+            <button
+              onClick={() => window.api.openExternal(`https://youtu.be/${ytVideoId}`)}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground shrink-0">
+              <ExternalLink className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+      )}
 
       {/* tab bar */}
       <div className="flex border-b border-border shrink-0 px-4">
@@ -1287,7 +1946,6 @@ export default function EpisodeWorkspace() {
       )}
       {tab === 'conteudo'    && <ContentTab       episodeId={episodeId} />}
       {tab === 'clips'       && <ClipsTab         episodeId={episodeId} episode={episode} />}
-      {tab === 'publicar'    && <PublishTab        episodeId={episodeId} onGoToContent={() => setTab('conteudo')} />}
     </div>
   )
 }

@@ -59,6 +59,20 @@ const api = {
     ipcRenderer.invoke('clips:create', episodeId, startTime, endTime, title),
   createClipsFromKeyMoments: (episodeId: number) =>
     ipcRenderer.invoke('clips:createFromKeyMoments', episodeId),
+  updateClip: (clipId: number, startTime: number, endTime: number) =>
+    ipcRenderer.invoke('clips:update', clipId, startTime, endTime),
+  setClipThumbnail: (clipId: number, filePath: string) =>
+    ipcRenderer.invoke('clips:setThumbnail', clipId, filePath),
+  setClipThumbnailFromFrame: (clipId: number, dataUrl: string) =>
+    ipcRenderer.invoke('clips:setThumbnailFromFrame', clipId, dataUrl),
+  generateClipSummary: (clipId: number, options?: Record<string, unknown>) =>
+    ipcRenderer.invoke('ai:generateClipSummary', clipId, options),
+  updateClipSummary: (clipId: number, summary: string) =>
+    ipcRenderer.invoke('clips:updateSummary', clipId, summary),
+  updateClipTitle: (clipId: number, title: string) =>
+    ipcRenderer.invoke('clips:updateTitle', clipId, title),
+  updateClipYouTubeId: (clipId: number, youtubeVideoId: string) =>
+    ipcRenderer.invoke('clips:setYouTubeId', clipId, youtubeVideoId),
   exportClip: (clipId: number) => ipcRenderer.invoke('clips:export', clipId),
   deleteClip: (clipId: number) => ipcRenderer.invoke('clips:delete', clipId),
   deleteAllClips: (episodeId: number) => ipcRenderer.invoke('clips:deleteAll', episodeId),
@@ -76,6 +90,9 @@ const api = {
   revealInFinder: (filePath: string) => ipcRenderer.invoke('files:reveal', filePath),
   getAppDataPath: () => ipcRenderer.invoke('files:getAppDataPath'),
   openExternal: (url: string) => ipcRenderer.invoke('files:openExternal', url),
+  copyImageToClipboard: (filePath: string) => ipcRenderer.invoke('files:copyImageToClipboard', filePath),
+  downloadFile: (filePath: string, defaultName?: string) =>
+    ipcRenderer.invoke('files:downloadFile', filePath, defaultName),
 
   // First run
   checkSetupComplete: () => ipcRenderer.invoke('setup:isComplete'),
@@ -96,7 +113,50 @@ const api = {
   // Settings
   getSetting: (key: string) => ipcRenderer.invoke('settings:get', key),
   setSetting: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value),
-  getAllSettings: () => ipcRenderer.invoke('settings:getAll')
+  getAllSettings: () => ipcRenderer.invoke('settings:getAll'),
+
+  // YouTube
+  getYouTubeStatus: () => ipcRenderer.invoke('youtube:getStatus'),
+  saveYouTubeCredentials: (clientId: string, clientSecret: string) =>
+    ipcRenderer.invoke('youtube:saveCredentials', clientId, clientSecret),
+  connectYouTube: () => ipcRenderer.invoke('youtube:connect'),
+  disconnectYouTube: () => ipcRenderer.invoke('youtube:disconnect'),
+  listYouTubeChannels: () => ipcRenderer.invoke('youtube:listChannels'),
+  resolveYouTubeChannel: (channelId: string) => ipcRenderer.invoke('youtube:resolveChannel', channelId),
+  saveYouTubeChannelConfig: (mainChannelId: string, cutsChannelId: string) =>
+    ipcRenderer.invoke('youtube:saveChannelConfig', mainChannelId, cutsChannelId),
+  connectForChannel: (channelId: string) =>
+    ipcRenderer.invoke('youtube:connectForChannel', channelId),
+  getChannelAuthStatus: (channelId: string) =>
+    ipcRenderer.invoke('youtube:channelAuthStatus', channelId),
+  listRecentVideos: (channelId: string, query?: string) =>
+    ipcRenderer.invoke('youtube:listRecentVideos', channelId, query),
+  uploadToYouTube: (opts: {
+    filePath: string; title: string; description: string; channelId: string;
+    thumbnailPath?: string; tags?: string[]; privacyStatus?: 'public' | 'unlisted' | 'private'
+  }) => ipcRenderer.invoke('youtube:uploadVideo', opts),
+  updateYouTubeVideoMetadata: (opts: {
+    videoId: string; title: string; description: string; tags?: string[]
+  }) => ipcRenderer.invoke('youtube:updateVideoMetadata', opts),
+  onYouTubeUploadProgress: (cb: (pct: number) => void) => {
+    const handler = (_: unknown, pct: number) => cb(pct)
+    ipcRenderer.on('youtube:uploadProgress', handler)
+    return () => ipcRenderer.removeListener('youtube:uploadProgress', handler)
+  },
+  onYouTubeAuthStarted: (cb: (url: string) => void) => {
+    const handler = (_: unknown, url: string) => cb(url)
+    ipcRenderer.on('youtube:authStarted', handler)
+    return () => ipcRenderer.removeListener('youtube:authStarted', handler)
+  },
+
+  // WordPress
+  publishToWordPress: (opts: {
+    episodeId: number; title: string; content: string;
+    slug?: string; status?: 'draft' | 'publish'
+  }) => ipcRenderer.invoke('wordpress:publish', opts),
+  updateWordPressPost: (opts: {
+    postId: number; title: string; content: string; slug?: string
+  }) => ipcRenderer.invoke('wordpress:update', opts),
 }
 
 if (process.contextIsolated) {
