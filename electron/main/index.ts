@@ -43,6 +43,7 @@ import { registerFileHandlers } from '../services/fileManager'
 import { registerWhisperSetupHandlers } from '../services/whisperSetup'
 import { registerFirstRunHandlers } from '../services/firstRunSetup'
 import { registerYouTubeHandlers } from '../services/youtubeService'
+import { registerWordPressHandlers } from '../services/wordpressService'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -137,6 +138,7 @@ app.whenReady().then(() => {
   registerWhisperSetupHandlers(ipcMain)
   registerFirstRunHandlers()
   registerYouTubeHandlers(ipcMain)
+  registerWordPressHandlers(ipcMain)
 
   createWindow()
 

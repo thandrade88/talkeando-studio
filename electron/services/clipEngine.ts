@@ -166,6 +166,18 @@ export function registerClipHandlers(ipcMain: IpcMain): void {
     return db.prepare('SELECT * FROM clips WHERE id = ?').get(clipId)
   })
 
+  ipcMain.handle('clips:updateTitle', (_event, clipId: number, title: string) => {
+    const db = getDatabase()
+    db.prepare('UPDATE clips SET title = ? WHERE id = ?').run(title, clipId)
+    return db.prepare('SELECT * FROM clips WHERE id = ?').get(clipId)
+  })
+
+  ipcMain.handle('clips:setYouTubeId', (_event, clipId: number, youtubeVideoId: string) => {
+    const db = getDatabase()
+    db.prepare('UPDATE clips SET youtube_video_id = ? WHERE id = ?').run(youtubeVideoId, clipId)
+    return db.prepare('SELECT * FROM clips WHERE id = ?').get(clipId)
+  })
+
   ipcMain.handle('clips:delete', (_event, clipId: number) => {
     const db = getDatabase()
     db.prepare('DELETE FROM clips WHERE id = ?').run(clipId)

@@ -99,4 +99,5 @@ export function setupDatabase(dbPathOverride?: string): void {
   addColumnIfMissing(db, 'episodes', 'audio_path', "TEXT DEFAULT ''")
   addColumnIfMissing(db, 'clips', 'thumbnail_path', "TEXT DEFAULT ''")
   addColumnIfMissing(db, 'clips', 'summary', "TEXT DEFAULT ''")
+  addColumnIfMissing(db, 'clips', 'youtube_video_id', "TEXT DEFAULT ''")
 }

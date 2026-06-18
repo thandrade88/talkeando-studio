@@ -343,11 +343,34 @@ export function registerYouTubeHandlers(ipcMain: IpcMain): void {
     return { authenticated: !!(access && refresh) }
   })
 
+  ipcMain.handle('youtube:listRecentVideos', async (_event, channelId: string, query?: string) => {
+    const client = buildOAuth2Client()
+    if (!loadChannelTokens(client, channelId) && !loadTokens(client)) {
+      throw new Error('Não autenticado no YouTube.')
+    }
+    const yt = google.youtube({ version: 'v3', auth: client })
+    const res = await yt.search.list({
+      part: ['snippet'],
+      channelId,
+      type: ['video'],
+      order: 'date',
+      maxResults: 20,
+      ...(query ? { q: query } : {}),
+    })
+    return (res.data.items ?? []).map(item => ({
+      videoId: item.id?.videoId ?? '',
+      title: item.snippet?.title ?? '',
+      publishedAt: item.snippet?.publishedAt ?? '',
+      thumb: item.snippet?.thumbnails?.default?.url ?? null,
+    }))
+  })
+
   ipcMain.handle('youtube:uploadVideo', async (event, opts: {
     filePath: string
     title: string
     description: string
     channelId: string
+    thumbnailPath?: string
     tags?: string[]
     madeForKids?: boolean
     privacyStatus?: 'public' | 'unlisted' | 'private'
@@ -391,8 +414,19 @@ export function registerYouTubeHandlers(ipcMain: IpcMain): void {
       }
     )
 
+    const videoId = res.data.id!
+
+    if (opts.thumbnailPath) {
+      try {
+        await yt.thumbnails.set({
+          videoId,
+          media: { body: createReadStream(opts.thumbnailPath) },
+        })
+      } catch { /* thumbnail upload failed — video still uploaded */ }
+    }
+
     win?.webContents.send('youtube:uploadProgress', 100)
-    return { videoId: res.data.id, videoUrl: `https://youtu.be/${res.data.id}` }
+    return { videoId, videoUrl: `https://youtu.be/${videoId}` }
   })
 
   ipcMain.handle('youtube:updateVideoMetadata', async (_event, opts: {
@@ -418,7 +452,7 @@ export function registerYouTubeHandlers(ipcMain: IpcMain): void {
         id: opts.videoId,
         snippet: {
           ...snippet,
-          title:       opts.title,
+          title:       opts.title || snippet.title,
           description: opts.description,
           tags:        opts.tags ?? snippet.tags ?? [],
         },

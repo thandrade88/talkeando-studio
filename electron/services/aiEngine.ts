@@ -484,13 +484,26 @@ export function registerAIHandlers(ipcMain: IpcMain): void {
     const win = BrowserWindow.fromWebContents(event.sender)
     win?.webContents.send('ai:progress', `Gerando resumo do clipe com ${meta.name}...`)
 
-    const prompt = `Você é um editor de podcasts brasileiros. Com base na transcrição abaixo de um clipe extraído do episódio "${clip.episode_title}" (título do clipe: "${clip.title}"), escreva um resumo claro e objetivo em português brasileiro, de 2 a 4 frases, descrevendo o que é discutido nesse trecho.
+    const prompt = `Você é um editor de podcasts brasileiros. Com base na transcrição abaixo de um clipe extraído do episódio "${clip.episode_title}", gere:
+
+1. Um título curto e atraente para o clipe (máx 80 caracteres), otimizado para YouTube Shorts / Reels
+2. Um resumo claro e objetivo em português brasileiro, de 2 a 4 frases, descrevendo o que é discutido nesse trecho
+
+Responda APENAS com um JSON puro (sem markdown):
+{"title": "...", "summary": "..."}
 
 TRECHO:
 ${transcript}`
 
-    const summary = (await generateText(provider, prompt)).trim()
-    db.prepare('UPDATE clips SET summary = ? WHERE id = ?').run(summary, clipId)
+    const raw = (await generateText(provider, prompt)).trim()
+    let title = clip.title
+    let summary = raw
+    try {
+      const parsed = JSON.parse(raw)
+      if (parsed.title) title = parsed.title
+      if (parsed.summary) summary = parsed.summary
+    } catch { /* fallback: use raw as summary */ }
+    db.prepare('UPDATE clips SET title = ?, summary = ? WHERE id = ?').run(title, summary, clipId)
 
     win?.webContents.send('ai:progress', 'Resumo do clipe gerado!')
 

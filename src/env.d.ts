@@ -61,6 +61,8 @@ interface Window {
     setClipThumbnailFromFrame: (clipId: number, dataUrl: string) => Promise<Clip>
     generateClipSummary: (clipId: number, options?: { provider?: 'claude' | 'openai' | 'gemini' }) => Promise<Clip>
     updateClipSummary: (clipId: number, summary: string) => Promise<Clip>
+    updateClipTitle: (clipId: number, title: string) => Promise<Clip>
+    updateClipYouTubeId: (clipId: number, youtubeVideoId: string) => Promise<Clip>
     exportClip: (clipId: number) => Promise<{ success: boolean; filePath: string }>
     deleteClip: (clipId: number) => Promise<{ success: boolean }>
     deleteAllClips: (episodeId: number) => Promise<{ success: boolean }>
@@ -98,16 +100,28 @@ interface Window {
     saveYouTubeChannelConfig: (mainChannelId: string, cutsChannelId: string) => Promise<{ success: boolean }>
     connectForChannel: (channelId: string) => Promise<{ success: boolean }>
     getChannelAuthStatus: (channelId: string) => Promise<{ authenticated: boolean }>
-    uploadToYouTube: (opts: { filePath: string; title: string; description: string; channelId: string; tags?: string[]; privacyStatus?: 'public' | 'unlisted' | 'private' }) => Promise<{ videoId: string; videoUrl: string }>
+    listRecentVideos: (channelId: string, query?: string) => Promise<YouTubeVideo[]>
+    uploadToYouTube: (opts: { filePath: string; title: string; description: string; channelId: string; thumbnailPath?: string; tags?: string[]; privacyStatus?: 'public' | 'unlisted' | 'private' }) => Promise<{ videoId: string; videoUrl: string }>
     updateYouTubeVideoMetadata: (opts: { videoId: string; title: string; description: string; tags?: string[] }) => Promise<{ success: boolean; videoUrl: string }>
     onYouTubeUploadProgress: (cb: (pct: number) => void) => () => void
     onYouTubeAuthStarted: (cb: (url: string) => void) => () => void
+
+    // WordPress
+    publishToWordPress: (opts: { episodeId: number; title: string; content: string; slug?: string; status?: 'draft' | 'publish' }) => Promise<{ postId: number; postUrl: string }>
+    updateWordPressPost: (opts: { postId: number; title: string; content: string; slug?: string }) => Promise<{ postId: number; postUrl: string }>
   }
 }
 
 interface YouTubeChannel {
   id: string
   title: string
+  thumb: string | null
+}
+
+interface YouTubeVideo {
+  videoId: string
+  title: string
+  publishedAt: string
   thumb: string | null
 }
 
@@ -163,4 +177,5 @@ interface Clip {
   file_path: string
   thumbnail_path: string
   summary: string
+  youtube_video_id: string
 }

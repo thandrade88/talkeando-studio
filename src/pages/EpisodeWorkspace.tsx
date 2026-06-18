@@ -3,8 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft, FileText, Sparkles, Scissors, Loader2, Clock,
   Save, Trash2, RefreshCw, ChevronDown, RotateCcw, Plus, Download, FolderOpen,
-  Send, Copy, Check, ExternalLink, Globe, CheckCircle2, Circle, Volume2, Image as ImageIcon, Camera,
-  MoveHorizontal, ZoomIn, Youtube, Upload, Settings,
+  Copy, Check, ExternalLink, Globe, CheckCircle2, Circle, Volume2, Image as ImageIcon, Camera,
+  MoveHorizontal, ZoomIn, Youtube, Upload, Settings, Search, X,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { cn, formatTimestamp, formatDuration } from '../lib/utils'
@@ -45,7 +45,7 @@ const STATUS_LABEL: Record<string, string> = {
   transcribed: 'Transcrito', ready: 'Pronto',
 }
 
-type Tab = 'transcricao' | 'conteudo' | 'clips' | 'publicar'
+type Tab = 'transcricao' | 'conteudo' | 'clips'
 
 // ─── Transcrição tab ──────────────────────────────────────────────────────────
 
@@ -538,6 +538,19 @@ function ContentTab({ episodeId }: { episodeId: number }) {
   const [igPromptSaved, setIgPromptSaved]       = useState(false)
   const defaultIgPromptRef = useRef<string>('')
 
+  // WordPress publishing
+  const [wpPostId, setWpPostId]             = useState<number | null>(null)
+  const [wpPublishing, setWpPublishing]     = useState(false)
+  const [wpResult, setWpResult]             = useState<string | null>(null)
+  const [wpError, setWpError]               = useState<string | null>(null)
+
+  // YouTube metadata update
+  const [ytVideoId, setYtVideoId]           = useState<string | null>(null)
+  const [ytUpdating, setYtUpdating]         = useState(false)
+  const [ytUpdated, setYtUpdated]           = useState(false)
+  const [ytError, setYtError]               = useState<string | null>(null)
+  const [copied, setCopied]                 = useState<string | null>(null)
+
   const activeContent = contents.find(c => c.type === contentType)
   function parseMeta(raw: string): { provider?: ProviderValue; model?: string } {
     try { return JSON.parse(raw) } catch { return {} }
@@ -545,6 +558,8 @@ function ContentTab({ episodeId }: { episodeId: number }) {
 
   useEffect(() => {
     window.api.getGeneratedContent(episodeId).then(setContents)
+    window.api.getSetting(`episode_${episodeId}_wp_post_id`).then(v => { if (v) setWpPostId(Number(v)) })
+    window.api.getSetting(`episode_${episodeId}_youtube_id`).then(v => { if (v) setYtVideoId(v) })
     window.api.getSetting('ai_provider').then(v => {
       if (v && ['claude', 'openai', 'gemini'].includes(v)) setProvider(v as ProviderValue)
       setProviderLoaded(true)
@@ -593,6 +608,54 @@ function ContentTab({ episodeId }: { episodeId: number }) {
       setContents(prev => prev.map(c => c.id === activeContent.id ? { ...c, content: editContent } : c))
       setIsDirty(false)
     } finally { setIsSaving(false) }
+  }
+
+  async function publishBlogPost() {
+    if (!activeContent || contentType !== 'blog_post') return
+    setWpPublishing(true); setWpError(null); setWpResult(null)
+    try {
+      let title = '', content = '', slug = ''
+      try {
+        const parsed = JSON.parse(activeContent.content)
+        title = parsed.seoTitle || parsed.title || ''
+        content = parsed.htmlContent || parsed.content || activeContent.content
+        slug = parsed.slug || ''
+      } catch {
+        content = activeContent.content
+      }
+      if (wpPostId) {
+        const r = await window.api.updateWordPressPost({ postId: wpPostId, title, content, slug })
+        setWpResult(r.postUrl)
+      } else {
+        const r = await window.api.publishToWordPress({ episodeId, title, content, slug, status: 'draft' })
+        setWpPostId(r.postId)
+        setWpResult(r.postUrl)
+      }
+    } catch (err) {
+      setWpError(err instanceof Error ? err.message : String(err))
+    } finally { setWpPublishing(false) }
+  }
+
+  async function updateYouTubeMetadata() {
+    if (!ytVideoId || !activeContent || contentType !== 'youtube') return
+    setYtUpdating(true); setYtError(null); setYtUpdated(false)
+    try {
+      await window.api.updateYouTubeVideoMetadata({
+        videoId: ytVideoId,
+        title:   '', // keep current title
+        description: activeContent.content,
+      })
+      setYtUpdated(true)
+      setTimeout(() => setYtUpdated(false), 3000)
+    } catch (err) {
+      setYtError(err instanceof Error ? err.message : String(err))
+    } finally { setYtUpdating(false) }
+  }
+
+  async function copyContent(text: string, key: string) {
+    await navigator.clipboard.writeText(text)
+    setCopied(key)
+    setTimeout(() => setCopied(null), 2000)
   }
 
   const providerLabel = AI_PROVIDERS.find(p => p.value === provider)?.label ?? 'IA'
@@ -817,6 +880,43 @@ function ContentTab({ episodeId }: { episodeId: number }) {
               placeholder="Conteúdo gerado aparecerá aqui..."
             />
           )}
+          {activeContent && (
+            <div className="flex items-center gap-2 pt-3 shrink-0">
+              <button onClick={() => copyContent(activeContent.content, contentType)}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary border border-border rounded-lg">
+                {copied === contentType ? <Check className="w-3 h-3 text-primary" /> : <Copy className="w-3 h-3" />}
+                {copied === contentType ? 'Copiado!' : 'Copiar'}
+              </button>
+              {contentType === 'blog_post' && (
+                <button onClick={publishBlogPost} disabled={wpPublishing}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg disabled:opacity-50">
+                  {wpPublishing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Globe className="w-3 h-3" />}
+                  {wpPostId ? 'Atualizar no WordPress' : 'Publicar no WordPress'}
+                </button>
+              )}
+              {contentType === 'youtube' && ytVideoId && (
+                <button onClick={updateYouTubeMetadata} disabled={ytUpdating}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg disabled:opacity-50">
+                  {ytUpdating
+                    ? <Loader2 className="w-3 h-3 animate-spin" />
+                    : ytUpdated
+                      ? <><Check className="w-3 h-3" />Atualizado!</>
+                      : <><Youtube className="w-3 h-3" />Atualizar no YouTube</>}
+                </button>
+              )}
+              {contentType === 'youtube' && !ytVideoId && (
+                <span className="text-xs text-muted-foreground">Vincule um vídeo na aba Transcrição para atualizar metadados.</span>
+              )}
+              {wpResult && (
+                <button onClick={() => window.api.openExternal(wpResult)}
+                  className="flex items-center gap-1 text-xs text-primary hover:underline">
+                  <ExternalLink className="w-3 h-3" />Ver post
+                </button>
+              )}
+              {wpError && <span className="text-xs text-destructive">{wpError}</span>}
+              {ytError && <span className="text-xs text-destructive">{ytError}</span>}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -940,17 +1040,73 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
   const [thumbCopied, setThumbCopied]       = useState(false)
   const [thumbError, setThumbError]         = useState<string | null>(null)
 
+  // Clip title
+  const [titleDraft, setTitleDraft]         = useState('')
+  const [isSavingTitle, setIsSavingTitle]   = useState(false)
+
   // Clip summary
   const [summaryDraft, setSummaryDraft]     = useState('')
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false)
   const [isSavingSummary, setIsSavingSummary] = useState(false)
   const [summaryError, setSummaryError]     = useState<string | null>(null)
 
+  // YouTube upload
+  const [ytCutsChId, setYtCutsChId]         = useState<string | null>(null)
+  const [ytConnected, setYtConnected]       = useState(false)
+  const [uploading, setUploading]           = useState<number | null>(null)
+  const [uploadPct, setUploadPct]           = useState(0)
+  const [uploadedUrls, setUploadedUrls]     = useState<Record<number, string>>({})
+  const [uploadError, setUploadError]       = useState<string | null>(null)
+  const [privacyStatus, setPrivacyStatus]   = useState<'private' | 'unlisted' | 'public'>('private')
+
   const selected    = clips.find(c => c.id === selectedId)
   const isDirtyClip = selected && (editStart !== selected.start_time || editEnd !== selected.end_time)
 
-  useEffect(() => { window.api.getClips(episodeId).then(setClips) }, [episodeId])
+  useEffect(() => {
+    window.api.getClips(episodeId).then(loaded => {
+      setClips(loaded)
+      const urls: Record<number, string> = {}
+      for (const c of loaded) {
+        if (c.youtube_video_id) urls[c.id] = `https://youtu.be/${c.youtube_video_id}`
+      }
+      setUploadedUrls(urls)
+    })
+  }, [episodeId])
   useEffect(() => window.api.onClipProgress(p => setExportProgress(p)), [])
+
+  useEffect(() => {
+    window.api.getYouTubeStatus().then(s => {
+      setYtConnected(s.connected)
+      if (s.cutsChannelId) setYtCutsChId(s.cutsChannelId)
+    })
+    return window.api.onYouTubeUploadProgress(pct => setUploadPct(pct))
+  }, [])
+
+  async function uploadClip(clip: Clip) {
+    if (!ytCutsChId || !clip.file_path) return
+    if (!clip.thumbnail_path) {
+      setUploadError('Selecione uma thumbnail antes de publicar o clipe.')
+      return
+    }
+    setUploading(clip.id); setUploadPct(0); setUploadError(null)
+    try {
+      const result = await window.api.uploadToYouTube({
+        filePath:      clip.file_path,
+        title:         clip.title,
+        description:   clip.summary ?? '',
+        channelId:     ytCutsChId,
+        thumbnailPath: clip.thumbnail_path,
+        privacyStatus,
+      })
+      setUploadedUrls(prev => ({ ...prev, [clip.id]: result.videoUrl }))
+      const updated = await window.api.updateClipYouTubeId(clip.id, result.videoId)
+      setClips(prev => prev.map(c => c.id === updated.id ? updated : c))
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setUploading(null)
+    }
+  }
 
   // Reset edit state and seek video when selected clip changes
   useEffect(() => {
@@ -958,6 +1114,7 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
     setEditStart(selected.start_time)
     setEditEnd(selected.end_time)
     setThumbError(null)
+    setTitleDraft(selected.title ?? '')
     setSummaryDraft(selected.summary ?? ''); setSummaryError(null)
     setVCropX(50); setVZoom(1)
     setTimeout(() => {
@@ -977,6 +1134,17 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
     } finally {
       setIsSavingClip(false)
     }
+  }
+
+  async function saveClipTitle() {
+    if (!selected || titleDraft === selected.title) return
+    setIsSavingTitle(true)
+    try {
+      const updated = await window.api.updateClipTitle(selected.id, titleDraft)
+      setClips(prev => prev.map(c => c.id === updated.id ? updated : c))
+    } catch (err) {
+      alert(`Erro ao salvar título: ${err}`)
+    } finally { setIsSavingTitle(false) }
   }
 
   async function chooseThumbnail() {
@@ -1042,6 +1210,7 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
     try {
       const updated = await window.api.generateClipSummary(selected.id)
       setClips(prev => prev.map(c => c.id === updated.id ? updated : c))
+      setTitleDraft(updated.title ?? '')
       setSummaryDraft(updated.summary ?? '')
     } catch (err) {
       setSummaryError(err instanceof Error ? err.message : String(err))
@@ -1218,8 +1387,36 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
                   {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                   {isExporting ? `Exportando ${exportProgress}%` : 'Exportar'}
                 </button>
+                {ytConnected && ytCutsChId && (
+                  uploadedUrls[selected.id] ? (
+                    <button onClick={() => window.api.openExternal(uploadedUrls[selected.id])}
+                      className="flex items-center gap-1.5 text-sm px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-md">
+                      <ExternalLink className="w-3.5 h-3.5" />YouTube
+                    </button>
+                  ) : (
+                    <button onClick={() => uploadClip(selected)}
+                      disabled={uploading === selected.id || !selected.file_path || !selected.thumbnail_path}
+                      title={!selected.file_path ? 'Exporte o clipe antes de publicar' : !selected.thumbnail_path ? 'Selecione uma thumbnail antes de publicar' : undefined}
+                      className="flex items-center gap-1.5 text-sm px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-md disabled:opacity-50">
+                      {uploading === selected.id
+                        ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />{uploadPct}%</>
+                        : <><Upload className="w-3.5 h-3.5" />Upload</>}
+                    </button>
+                  )
+                )}
+                {ytConnected && ytCutsChId && (
+                  <select value={privacyStatus} onChange={e => setPrivacyStatus(e.target.value as typeof privacyStatus)}
+                    className="text-xs bg-secondary border border-border rounded-md px-2 py-1.5 focus:outline-none">
+                    <option value="private">Privado</option>
+                    <option value="unlisted">Não listado</option>
+                    <option value="public">Público</option>
+                  </select>
+                )}
               </div>
             </div>
+            {uploadError && (
+              <p className="px-6 py-2 text-xs text-destructive bg-destructive/10 shrink-0">{uploadError}</p>
+            )}
             <div className="flex-1 overflow-y-auto p-5">
               <div className="grid grid-cols-[7fr_3fr] gap-4 h-full">
 
@@ -1298,6 +1495,27 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
                           {formatDuration(editEnd - editStart)}
                         </p>
                       </div>
+                    </div>
+                  </div>
+
+                  {/* title */}
+                  <div className="bg-card border border-border rounded-xl p-4 space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Título do clipe</p>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={titleDraft}
+                        onChange={e => setTitleDraft(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') saveClipTitle() }}
+                        className="flex-1 bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary/50"
+                      />
+                      {titleDraft !== selected.title && (
+                        <button onClick={saveClipTitle} disabled={isSavingTitle}
+                          className="flex items-center gap-1.5 px-3 py-2 text-xs bg-primary hover:bg-primary/90 text-white rounded-lg disabled:opacity-50">
+                          {isSavingTitle ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                          Salvar
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -1437,345 +1655,6 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
   )
 }
 
-// ─── Publicar tab ────────────────────────────────────────────────────────────
-
-
-function PublishTab({ episode, episodeId, onGoToContent }: {
-  episode: Episode; episodeId: number; onGoToContent: () => void
-}) {
-  const navigate = useNavigate()
-  const [contents, setContents]   = useState<GeneratedContent[]>([])
-  const [clips, setClips]         = useState<Clip[]>([])
-  const [wpUrl, setWpUrl]         = useState<string | null>(null)
-  const [copied, setCopied]       = useState<string | null>(null)
-  const [ytStatus, setYtStatus]   = useState<{
-    connected: boolean; mainChannelId: string | null; cutsChannelId: string | null
-  }>({ connected: false, mainChannelId: null, cutsChannelId: null })
-  // episode: stores the live-stream YouTube video ID for metadata updates
-  const [episodeVideoId, setEpisodeVideoId]   = useState('')
-  const [metaUpdating, setMetaUpdating]       = useState(false)
-  const [metaUpdated, setMetaUpdated]         = useState(false)
-  const [metaError, setMetaError]             = useState<string | null>(null)
-  // clips: full upload to cuts channel
-  const [uploading, setUploading]             = useState<`clip:${number}` | null>(null)
-  const [uploadPct, setUploadPct]             = useState(0)
-  const [uploadedUrls, setUploadedUrls]       = useState<Record<string, string>>({})
-  const [uploadError, setUploadError]         = useState<string | null>(null)
-  const [privacyStatus, setPrivacyStatus]     = useState<'private' | 'unlisted' | 'public'>('private')
-
-  useEffect(() => {
-    window.api.getGeneratedContent(episodeId).then(setContents)
-    window.api.getClips(episodeId).then(setClips)
-    window.api.getSetting('wordpress_url').then(setWpUrl)
-    window.api.getYouTubeStatus().then(s => setYtStatus({
-      connected: s.connected,
-      mainChannelId: s.mainChannelId,
-      cutsChannelId: s.cutsChannelId,
-    }))
-    // Restore saved video ID for this episode
-    window.api.getSetting(`episode_${episodeId}_youtube_id`).then(v => { if (v) setEpisodeVideoId(v) })
-    return window.api.onYouTubeUploadProgress(pct => setUploadPct(pct))
-  }, [episodeId])
-
-  async function copy(text: string, key: string) {
-    await navigator.clipboard.writeText(text)
-    setCopied(key)
-    setTimeout(() => setCopied(null), 2000)
-  }
-
-  function extractVideoId(input: string): string {
-    // Accept bare ID or full URL
-    const m = input.match(/(?:v=|youtu\.be\/|embed\/)([A-Za-z0-9_-]{11})/)
-    return m ? m[1] : input.trim()
-  }
-
-  async function updateEpisodeMetadata() {
-    const videoId = extractVideoId(episodeVideoId)
-    if (!videoId) return
-    const ytContent = contents.find(c => c.type === 'youtube')
-    setMetaUpdating(true); setMetaError(null); setMetaUpdated(false)
-    try {
-      await window.api.updateYouTubeVideoMetadata({
-        videoId,
-        title:       episode.title,
-        description: ytContent?.content ?? '',
-      })
-      // Persist the video ID for next time
-      await window.api.setSetting(`episode_${episodeId}_youtube_id`, videoId)
-      setEpisodeVideoId(videoId)
-      setMetaUpdated(true)
-      setTimeout(() => setMetaUpdated(false), 3000)
-    } catch (err) {
-      setMetaError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setMetaUpdating(false)
-    }
-  }
-
-  async function uploadClip(clip: Clip) {
-    if (!ytStatus.cutsChannelId || !clip.file_path) return
-    const key = `clip:${clip.id}` as `clip:${number}`
-    setUploading(key); setUploadPct(0); setUploadError(null)
-    try {
-      const result = await window.api.uploadToYouTube({
-        filePath:      clip.file_path,
-        title:         clip.title,
-        description:   clip.summary ?? '',
-        channelId:     ytStatus.cutsChannelId,
-        privacyStatus,
-      })
-      setUploadedUrls(prev => ({ ...prev, [key]: result.videoUrl }))
-    } catch (err) {
-      setUploadError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setUploading(null)
-    }
-  }
-
-  const ytContent    = contents.find(c => c.type === 'youtube')
-  const blogContent  = contents.find(c => c.type === 'blog_post')
-  const igContent    = contents.find(c => c.type === 'instagram')
-
-  const ytCutsNotConfigured = !ytStatus.connected || !ytStatus.cutsChannelId
-
-  return (
-    <div className="flex-1 overflow-y-auto p-6">
-      <div className="max-w-4xl mx-auto space-y-5">
-
-        {/* ── YouTube — Canal Principal ── */}
-        <section className="bg-card border border-border rounded-xl overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center">
-                <Youtube className="w-4 h-4 text-red-500" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold">Canal Principal</p>
-                <p className="text-xs text-muted-foreground">Atualizar metadados do episódio</p>
-              </div>
-            </div>
-            {!ytStatus.connected && (
-              <button onClick={() => navigate('/settings')}
-                className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary border border-border rounded-lg text-muted-foreground">
-                <Settings className="w-3 h-3" />Configurar
-              </button>
-            )}
-          </div>
-
-          <div className="p-5">
-            {!ytStatus.connected ? (
-              <p className="text-xs text-muted-foreground/60 text-center py-1">Conecte sua conta do YouTube nas configurações.</p>
-            ) : !ytStatus.mainChannelId ? (
-              <p className="text-xs text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
-                Configure o canal principal em <strong>Configurações → YouTube</strong>.
-              </p>
-            ) : (
-              <div className="space-y-2.5">
-                <p className="text-xs text-muted-foreground">
-                  Cole o link ou ID do vídeo do YouTube para atualizar título e descrição com o conteúdo gerado.
-                </p>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={episodeVideoId}
-                    onChange={e => setEpisodeVideoId(e.target.value)}
-                    placeholder="https://youtu.be/... ou ID do vídeo"
-                    className="flex-1 text-xs bg-secondary border border-border rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-primary/50 placeholder:text-muted-foreground/40"
-                  />
-                  <button
-                    onClick={updateEpisodeMetadata}
-                    disabled={metaUpdating || !episodeVideoId.trim()}
-                    className="flex items-center gap-1.5 text-xs px-3 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg disabled:opacity-50 shrink-0">
-                    {metaUpdating
-                      ? <><Loader2 className="w-3 h-3 animate-spin" />Atualizando...</>
-                      : metaUpdated
-                        ? <><Check className="w-3 h-3" />Atualizado!</>
-                        : <>Atualizar metadados</>}
-                  </button>
-                  {ytContent && (
-                    <button onClick={() => copy(ytContent.content, 'yt_episode')}
-                      className="flex items-center gap-1.5 text-xs px-3 py-2 bg-secondary border border-border rounded-lg shrink-0">
-                      {copied === 'yt_episode' ? <Check className="w-3 h-3 text-primary" /> : <Copy className="w-3 h-3" />}
-                      {copied === 'yt_episode' ? 'Copiado!' : 'Copiar descrição'}
-                    </button>
-                  )}
-                </div>
-                {metaError && (
-                  <p className="text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">{metaError}</p>
-                )}
-                {episodeVideoId && !metaUpdating && (
-                  <button
-                    onClick={() => window.api.openExternal(`https://youtu.be/${extractVideoId(episodeVideoId)}`)}
-                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-                    <ExternalLink className="w-3 h-3" />Ver vídeo no YouTube
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* ── YouTube — Canal de Cortes ── */}
-        <section className="bg-card border border-border rounded-xl overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center">
-                <Scissors className="w-4 h-4 text-red-500" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold">Canal de Cortes</p>
-                <p className="text-xs text-muted-foreground">Upload dos clipes</p>
-              </div>
-            </div>
-            {ytStatus.cutsChannelId && (
-              <select value={privacyStatus} onChange={e => setPrivacyStatus(e.target.value as typeof privacyStatus)}
-                className="text-xs bg-secondary border border-border rounded-lg px-2 py-1 focus:outline-none">
-                <option value="private">Privado</option>
-                <option value="unlisted">Não listado</option>
-                <option value="public">Público</option>
-              </select>
-            )}
-          </div>
-
-          <div className="p-5">
-            {!ytStatus.connected ? (
-              <p className="text-xs text-muted-foreground/60 text-center py-1">Conecte sua conta do YouTube nas configurações.</p>
-            ) : !ytStatus.cutsChannelId ? (
-              <p className="text-xs text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
-                Configure o canal de cortes em <strong>Configurações → YouTube</strong>.
-              </p>
-            ) : clips.length === 0 ? (
-              <p className="text-xs text-muted-foreground/60 text-center py-2">Nenhum clipe criado ainda</p>
-            ) : (
-              <div className="space-y-1.5">
-                {clips.map(clip => {
-                  const key = `clip:${clip.id}` as `clip:${number}`
-                  return (
-                    <div key={clip.id} className="flex items-center gap-4 py-2.5 px-3 bg-secondary/30 rounded-lg">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm truncate">{clip.title}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {formatTimestamp(clip.start_time)} → {formatTimestamp(clip.end_time)}
-                          {!clip.file_path && <span className="text-amber-500 ml-2">· exportar antes de publicar</span>}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {uploadedUrls[key] ? (
-                          <button onClick={() => window.api.openExternal(uploadedUrls[key])}
-                            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg">
-                            <ExternalLink className="w-3 h-3" />Ver no YouTube
-                          </button>
-                        ) : (
-                          <button onClick={() => uploadClip(clip)}
-                            disabled={!!uploading || ytCutsNotConfigured || !clip.file_path}
-                            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary hover:bg-secondary/80 border border-border rounded-lg disabled:opacity-50">
-                            {uploading === key
-                              ? <><Loader2 className="w-3 h-3 animate-spin" />{uploadPct}%</>
-                              : <><Upload className="w-3 h-3" />Upload</>}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-
-                {uploadError && (
-                  <p className="text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">{uploadError}</p>
-                )}
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* ── Instagram ── */}
-        <section className="bg-card border border-border rounded-xl overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-pink-500/10 flex items-center justify-center">
-                <Globe className="w-4 h-4 text-pink-500" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold">Instagram</p>
-                <p className="text-xs text-muted-foreground">Copie a legenda e publique manualmente</p>
-              </div>
-            </div>
-            {igContent && (
-              <div className="flex items-center gap-2">
-                <button onClick={() => copy(igContent.content, 'instagram')}
-                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary border border-border rounded-lg">
-                  {copied === 'instagram' ? <Check className="w-3 h-3 text-primary" /> : <Copy className="w-3 h-3" />}
-                  {copied === 'instagram' ? 'Copiado!' : 'Copiar legenda'}
-                </button>
-                <button onClick={() => window.api.openExternal('https://www.instagram.com/')}
-                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-pink-500 hover:bg-pink-600 text-white rounded-lg">
-                  <ExternalLink className="w-3 h-3" />Abrir Instagram
-                </button>
-              </div>
-            )}
-            {!igContent && (
-              <button onClick={onGoToContent}
-                className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary border border-border rounded-lg text-muted-foreground">
-                <Sparkles className="w-3 h-3" />Gerar conteúdo
-              </button>
-            )}
-          </div>
-          {igContent ? (
-            <pre className="px-5 py-4 text-xs font-mono text-foreground/80 whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto">
-              {igContent.content.slice(0, 800)}{igContent.content.length > 800 ? '\n…' : ''}
-            </pre>
-          ) : (
-            <p className="px-5 py-4 text-xs text-muted-foreground/50 text-center">Legenda não gerada ainda</p>
-          )}
-        </section>
-
-        {/* ── WordPress / Blog ── */}
-        <section className="bg-card border border-border rounded-xl overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                <Globe className="w-4 h-4 text-blue-400" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold">WordPress / Blog</p>
-                <p className="text-xs text-muted-foreground">Copie o conteúdo e publique no seu blog</p>
-              </div>
-            </div>
-            {blogContent && (
-              <div className="flex items-center gap-2">
-                <button onClick={() => copy(blogContent.content, 'blog')}
-                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary border border-border rounded-lg">
-                  {copied === 'blog' ? <Check className="w-3 h-3 text-primary" /> : <Copy className="w-3 h-3" />}
-                  {copied === 'blog' ? 'Copiado!' : 'Copiar post'}
-                </button>
-                {wpUrl && (
-                  <button onClick={() => window.api.openExternal(wpUrl)}
-                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg">
-                    <ExternalLink className="w-3 h-3" />Abrir WordPress
-                  </button>
-                )}
-              </div>
-            )}
-            {!blogContent && (
-              <button onClick={onGoToContent}
-                className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary border border-border rounded-lg text-muted-foreground">
-                <Sparkles className="w-3 h-3" />Gerar conteúdo
-              </button>
-            )}
-          </div>
-          {blogContent ? (
-            <pre className="px-5 py-4 text-xs font-mono text-foreground/80 whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto">
-              {blogContent.content.slice(0, 800)}{blogContent.content.length > 800 ? '\n…' : ''}
-            </pre>
-          ) : (
-            <p className="px-5 py-4 text-xs text-muted-foreground/50 text-center">Post não gerado ainda</p>
-          )}
-        </section>
-
-      </div>
-    </div>
-  )
-}
-
 // ─── Workspace shell ──────────────────────────────────────────────────────────
 
 export default function EpisodeWorkspace() {
@@ -1795,6 +1674,19 @@ export default function EpisodeWorkspace() {
   const [txProgress, setTxProgress]   = useState(0)
   const [txStatus, setTxStatus]       = useState('')
   const [txEta, setTxEta]             = useState<string | null>(null)
+
+  const [ytVideos, setYtVideos]       = useState<YouTubeVideo[]>([])
+  const [ytVideoId, setYtVideoId]     = useState('')
+  const [ytSelectedVideo, setYtSelectedVideo] = useState<YouTubeVideo | null>(null)
+  const [ytLoading, setYtLoading]     = useState(false)
+  const [ytConnected, setYtConnected] = useState(false)
+  const [ytMainChId, setYtMainChId]   = useState<string | null>(null)
+  const [ytSaved, setYtSaved]         = useState(false)
+  const [ytSearch, setYtSearch]       = useState('')
+  const [ytDropOpen, setYtDropOpen]   = useState(false)
+  const [ytSearching, setYtSearching] = useState(false)
+  const ytSearchRef = useRef<HTMLDivElement>(null)
+  const ytDebounceRef = useRef<ReturnType<typeof setTimeout>>()
 
   useEffect(() => {
     if (!episodeId) return
@@ -1823,6 +1715,50 @@ export default function EpisodeWorkspace() {
     })
   }, [episodeId, transcriptionStartedAt])
 
+  useEffect(() => {
+    if (!episodeId) return
+    window.api.getYouTubeStatus().then(async s => {
+      setYtConnected(s.connected)
+      if (s.mainChannelId) setYtMainChId(s.mainChannelId)
+      if (!s.connected || !s.mainChannelId) return
+      setYtLoading(true)
+      try {
+        const videos = await window.api.listRecentVideos(s.mainChannelId)
+        setYtVideos(videos)
+        const savedId = await window.api.getSetting(`episode_${episodeId}_youtube_id`)
+        if (savedId) {
+          setYtVideoId(savedId)
+          const match = videos.find(v => v.videoId === savedId)
+          if (match) {
+            setYtSelectedVideo(match)
+          } else {
+            const results = await window.api.listRecentVideos(s.mainChannelId, savedId)
+            const found = results.find(v => v.videoId === savedId)
+            if (found) setYtSelectedVideo(found)
+            else setYtSelectedVideo({ videoId: savedId, title: savedId, publishedAt: '', thumb: null })
+          }
+        }
+      } catch {}
+      finally { setYtLoading(false) }
+    })
+  }, [episodeId])
+
+  useEffect(() => {
+    if (!ytMainChId) return
+    clearTimeout(ytDebounceRef.current)
+    if (!ytSearch.trim()) {
+      setYtSearching(true)
+      window.api.listRecentVideos(ytMainChId).then(setYtVideos).catch(() => {}).finally(() => setYtSearching(false))
+      return
+    }
+    setYtSearching(true)
+    ytDebounceRef.current = setTimeout(() => {
+      window.api.listRecentVideos(ytMainChId, ytSearch.trim())
+        .then(setYtVideos).catch(() => {}).finally(() => setYtSearching(false))
+    }, 400)
+    return () => clearTimeout(ytDebounceRef.current)
+  }, [ytSearch, ytMainChId])
+
   if (!episode || !episodeId) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
@@ -1841,8 +1777,15 @@ export default function EpisodeWorkspace() {
     { id: 'transcricao', label: 'Transcrição', icon: FileText },
     { id: 'conteudo',    label: 'Conteúdo',    icon: Sparkles },
     { id: 'clips',       label: 'Clips',        icon: Scissors },
-    { id: 'publicar',    label: 'Publicar',     icon: Send     },
   ]
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ytSearchRef.current && !ytSearchRef.current.contains(e.target as Node)) setYtDropOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
 
   return (
     <div className="flex flex-col h-full">
@@ -1869,6 +1812,104 @@ export default function EpisodeWorkspace() {
           {isTranscribing && <Loader2 className="inline ml-1 w-3 h-3 animate-spin" />}
         </span>
       </header>
+
+      {/* YouTube episode link */}
+      {ytConnected && ytMainChId && (
+        <div className="flex items-center gap-3 px-4 py-2 border-b border-border shrink-0">
+          <Youtube className="w-4 h-4 text-red-500 shrink-0" />
+          <div className="relative flex-1" ref={ytSearchRef}>
+            {ytVideoId && !ytDropOpen ? (
+              <div className="flex items-center gap-2 bg-secondary border border-border rounded-lg px-2 py-1 text-xs">
+                {ytSelectedVideo?.thumb && (
+                  <img src={ytSelectedVideo.thumb} alt="" className="w-10 h-6 rounded object-cover shrink-0 border border-border" />
+                )}
+                <span className="flex-1 truncate text-xs font-medium">
+                  {ytSelectedVideo?.title ?? ytVideoId}
+                </span>
+                <button onClick={() => { setYtDropOpen(true); setYtSearch('') }}
+                  className="text-muted-foreground hover:text-foreground shrink-0">
+                  <Search className="w-3 h-3" />
+                </button>
+                <button onClick={async () => {
+                  setYtVideoId(''); setYtSelectedVideo(null)
+                  if (episodeId) await window.api.setSetting(`episode_${episodeId}_youtube_id`, '')
+                }} className="text-muted-foreground hover:text-destructive shrink-0">
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center bg-secondary border border-border rounded-lg px-3 py-1.5 gap-2">
+                  <Search className="w-3 h-3 text-muted-foreground shrink-0" />
+                  <input
+                    type="text"
+                    value={ytSearch}
+                    onChange={e => { setYtSearch(e.target.value); setYtDropOpen(true) }}
+                    onFocus={() => setYtDropOpen(true)}
+                    placeholder="Buscar vídeo do YouTube…"
+                    className="flex-1 bg-transparent text-xs focus:outline-none placeholder:text-muted-foreground/50"
+                    autoFocus={ytDropOpen}
+                  />
+                  {ytSearch && (
+                    <button onClick={() => setYtSearch('')} className="text-muted-foreground hover:text-foreground shrink-0">
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+                {ytDropOpen && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto">
+                    {ytSearching && (
+                      <div className="flex items-center justify-center py-3">
+                        <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                      </div>
+                    )}
+                    {!ytSearching && ytVideos.map(v => (
+                        <button
+                          key={v.videoId}
+                          onClick={async () => {
+                            setYtVideoId(v.videoId)
+                            setYtSelectedVideo(v)
+                            setYtDropOpen(false)
+                            setYtSearch('')
+                            if (episodeId) {
+                              await window.api.setSetting(`episode_${episodeId}_youtube_id`, v.videoId)
+                              setYtSaved(true); setTimeout(() => setYtSaved(false), 2000)
+                            }
+                          }}
+                          className={cn(
+                            'flex items-center gap-3 w-full px-3 py-2 text-left hover:bg-secondary/80 transition-colors',
+                            v.videoId === ytVideoId && 'bg-primary/10'
+                          )}
+                        >
+                          {v.thumb && (
+                            <img src={v.thumb} alt="" className="w-16 h-9 rounded object-cover shrink-0 border border-border" />
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium truncate">{v.title}</p>
+                            <p className="text-[11px] text-muted-foreground">
+                              {new Date(v.publishedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                            </p>
+                          </div>
+                        </button>
+                      ))}
+                    {!ytSearching && ytVideos.length === 0 && (
+                      <p className="px-3 py-3 text-xs text-muted-foreground text-center">Nenhum vídeo encontrado</p>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+          {ytSaved && <Check className="w-3.5 h-3.5 text-primary shrink-0" />}
+          {ytVideoId && !ytDropOpen && (
+            <button
+              onClick={() => window.api.openExternal(`https://youtu.be/${ytVideoId}`)}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground shrink-0">
+              <ExternalLink className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+      )}
 
       {/* tab bar */}
       <div className="flex border-b border-border shrink-0 px-4">
@@ -1905,7 +1946,6 @@ export default function EpisodeWorkspace() {
       )}
       {tab === 'conteudo'    && <ContentTab       episodeId={episodeId} />}
       {tab === 'clips'       && <ClipsTab         episodeId={episodeId} episode={episode} />}
-      {tab === 'publicar'    && <PublishTab        episode={episode} episodeId={episodeId} onGoToContent={() => setTab('conteudo')} />}
     </div>
   )
 }

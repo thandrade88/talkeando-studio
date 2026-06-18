@@ -69,6 +69,10 @@ const api = {
     ipcRenderer.invoke('ai:generateClipSummary', clipId, options),
   updateClipSummary: (clipId: number, summary: string) =>
     ipcRenderer.invoke('clips:updateSummary', clipId, summary),
+  updateClipTitle: (clipId: number, title: string) =>
+    ipcRenderer.invoke('clips:updateTitle', clipId, title),
+  updateClipYouTubeId: (clipId: number, youtubeVideoId: string) =>
+    ipcRenderer.invoke('clips:setYouTubeId', clipId, youtubeVideoId),
   exportClip: (clipId: number) => ipcRenderer.invoke('clips:export', clipId),
   deleteClip: (clipId: number) => ipcRenderer.invoke('clips:delete', clipId),
   deleteAllClips: (episodeId: number) => ipcRenderer.invoke('clips:deleteAll', episodeId),
@@ -125,9 +129,11 @@ const api = {
     ipcRenderer.invoke('youtube:connectForChannel', channelId),
   getChannelAuthStatus: (channelId: string) =>
     ipcRenderer.invoke('youtube:channelAuthStatus', channelId),
+  listRecentVideos: (channelId: string, query?: string) =>
+    ipcRenderer.invoke('youtube:listRecentVideos', channelId, query),
   uploadToYouTube: (opts: {
     filePath: string; title: string; description: string; channelId: string;
-    tags?: string[]; privacyStatus?: 'public' | 'unlisted' | 'private'
+    thumbnailPath?: string; tags?: string[]; privacyStatus?: 'public' | 'unlisted' | 'private'
   }) => ipcRenderer.invoke('youtube:uploadVideo', opts),
   updateYouTubeVideoMetadata: (opts: {
     videoId: string; title: string; description: string; tags?: string[]
@@ -141,7 +147,16 @@ const api = {
     const handler = (_: unknown, url: string) => cb(url)
     ipcRenderer.on('youtube:authStarted', handler)
     return () => ipcRenderer.removeListener('youtube:authStarted', handler)
-  }
+  },
+
+  // WordPress
+  publishToWordPress: (opts: {
+    episodeId: number; title: string; content: string;
+    slug?: string; status?: 'draft' | 'publish'
+  }) => ipcRenderer.invoke('wordpress:publish', opts),
+  updateWordPressPost: (opts: {
+    postId: number; title: string; content: string; slug?: string
+  }) => ipcRenderer.invoke('wordpress:update', opts),
 }
 
 if (process.contextIsolated) {

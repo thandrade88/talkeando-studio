@@ -373,22 +373,54 @@ export default function Settings() {
               />
             </section>
 
-            {/* WordPress URL */}
+            {/* WordPress */}
             <section className="bg-card border border-border rounded-xl p-5 space-y-3">
               <h2 className="text-sm font-semibold flex items-center gap-2">
                 <Globe className="w-4 h-4 text-primary" />
-                URL do WordPress
+                WordPress
               </h2>
-              <p className="text-xs text-muted-foreground">Usado para abrir o painel ao publicar conteúdo.</p>
+              <p className="text-xs text-muted-foreground">
+                URL do site e credenciais para publicar posts via REST API.
+                Crie uma <strong className="text-foreground">Application Password</strong> em
+                Usuários → Perfil → Senhas de aplicação.
+              </p>
               <div className="flex gap-2">
                 <input
                   type="url"
                   value={settings.wordpress_url ?? ''}
                   onChange={e => setSettings(p => ({ ...p, wordpress_url: e.target.value }))}
-                  placeholder="https://meusite.com/wp-admin"
+                  placeholder="https://meusite.com"
                   className="flex-1 bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary/40"
                 />
                 <SaveButton onClick={() => saveSetting('wordpress_url', settings.wordpress_url ?? '')} saved={saved.wordpress_url} />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Usuário</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={settings.wordpress_user ?? ''}
+                      onChange={e => setSettings(p => ({ ...p, wordpress_user: e.target.value }))}
+                      placeholder="admin"
+                      className="flex-1 bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary/40"
+                    />
+                    <SaveButton onClick={() => saveSetting('wordpress_user', settings.wordpress_user ?? '')} saved={saved.wordpress_user} />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Application Password</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      value={settings.wordpress_app_password ?? ''}
+                      onChange={e => setSettings(p => ({ ...p, wordpress_app_password: e.target.value }))}
+                      placeholder="xxxx xxxx xxxx xxxx"
+                      className="flex-1 bg-secondary border border-border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-primary/40"
+                    />
+                    <SaveButton onClick={() => saveSetting('wordpress_app_password', settings.wordpress_app_password ?? '')} saved={saved.wordpress_app_password} />
+                  </div>
+                </div>
               </div>
             </section>
 
