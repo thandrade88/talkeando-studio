@@ -3,7 +3,7 @@ import { getDatabase } from './database'
 import { spawn } from 'child_process'
 import { existsSync, unlinkSync, readFileSync } from 'fs'
 import { extname, join } from 'path'
-import { tmpdir } from 'os'
+import { tmpdir, cpus } from 'os'
 import { getWhisperBinaryPath, getModelPath } from './whisperSetup'
 
 // Formats whisper-cli cannot decode natively — need FFmpeg audio extraction first
@@ -90,6 +90,147 @@ function parseWhisperJSON(jsonStr: string): { start_time: number; end_time: numb
   }
 }
 
+// ─── Parallel chunked transcription ───────────────────────────────────────────
+
+const CHUNK_DURATION = 300   // 5 minutes per chunk
+const OVERLAP = 10           // 10-second overlap between chunks
+const MAX_WORKERS = Math.max(1, Math.min(cpus().length - 1, 4))
+
+type Segment = { start_time: number; end_time: number; text: string }
+
+function probeDuration(ffmpeg: string, filePath: string): Promise<number> {
+  return new Promise((resolve) => {
+    const proc = spawn(ffmpeg, ['-i', filePath, '-f', 'null', '-'])
+    let stderr = ''
+    proc.stderr.on('data', (d: Buffer) => { stderr += d.toString() })
+    proc.on('close', () => {
+      const m = stderr.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/)
+      if (!m) { resolve(0); return }
+      resolve(Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]))
+    })
+    proc.on('error', () => resolve(0))
+  })
+}
+
+function splitAudioIntoChunks(
+  ffmpeg: string, sourcePath: string, totalDuration: number,
+  episodeId: number, alreadyClean: boolean,
+): { chunkPath: string; offsetSeconds: number; promise: Promise<void> }[] {
+  const chunks: { chunkPath: string; offsetSeconds: number; promise: Promise<void> }[] = []
+  let offset = 0
+  let index = 0
+  while (offset < totalDuration) {
+    const end = Math.min(offset + CHUNK_DURATION + OVERLAP, totalDuration)
+    const chunkPath = join(tmpdir(), `talkeando_${episodeId}_chunk${index}_${Date.now()}.wav`)
+    const promise = extractAudio(ffmpeg, sourcePath, chunkPath, offset, end, alreadyClean)
+    chunks.push({ chunkPath, offsetSeconds: offset, promise })
+    offset += CHUNK_DURATION
+    index++
+  }
+  return chunks
+}
+
+function transcribeChunk(
+  whisperBin: string, modelPath: string, language: string,
+  chunkPath: string, offsetSeconds: number,
+): Promise<Segment[]> {
+  return new Promise((resolve, reject) => {
+    let stdoutBuf = ''
+    let stderrBuf = ''
+    const proc = spawn(whisperBin, [
+      '-m', modelPath, '-f', chunkPath, '-l', language, '-pp',
+    ])
+    proc.stdout.on('data', (d: Buffer) => { stdoutBuf += d.toString() })
+    proc.stderr.on('data', (d: Buffer) => { stderrBuf += d.toString() })
+    proc.on('close', (code) => {
+      try { unlinkSync(chunkPath) } catch {}
+      if (code !== 0) {
+        reject(new Error(`Whisper chunk failed (code ${code}): ${stderrBuf.slice(-200)}`))
+        return
+      }
+      const segs = parseWhisperOutput(stdoutBuf).map(s => ({
+        start_time: s.start_time + offsetSeconds,
+        end_time: s.end_time + offsetSeconds,
+        text: s.text,
+      }))
+      resolve(segs)
+    })
+    proc.on('error', (err) => {
+      try { unlinkSync(chunkPath) } catch {}
+      reject(err)
+    })
+  })
+}
+
+// Merge segments from all chunks, deduplicating the overlap regions.
+// In the overlap window, keep only segments from the earlier chunk
+// (they have more left-context and tend to produce cleaner sentence endings).
+export function mergeChunkSegments(chunkResults: { offsetSeconds: number; segments: Segment[] }[]): Segment[] {
+  if (chunkResults.length === 0) return []
+  if (chunkResults.length === 1) return chunkResults[0].segments
+
+  const sorted = [...chunkResults].sort((a, b) => a.offsetSeconds - b.offsetSeconds)
+  const merged: Segment[] = []
+
+  for (let i = 0; i < sorted.length; i++) {
+    const { offsetSeconds, segments } = sorted[i]
+    const overlapBoundary = offsetSeconds + OVERLAP
+
+    for (const seg of segments) {
+      if (i > 0 && seg.start_time < overlapBoundary) continue
+      merged.push(seg)
+    }
+  }
+
+  return merged.sort((a, b) => a.start_time - b.start_time)
+}
+
+async function runParallelTranscription(
+  ffmpeg: string, whisperBin: string, modelPath: string, language: string,
+  audioPath: string, totalDuration: number, episodeId: number,
+  alreadyClean: boolean, globalOffset: number,
+  onProgress: (pct: number, msg: string) => void,
+): Promise<Segment[]> {
+  const chunks = splitAudioIntoChunks(ffmpeg, audioPath, totalDuration, episodeId, alreadyClean)
+  const totalChunks = chunks.length
+  onProgress(0, `Dividindo áudio em ${totalChunks} partes...`)
+
+  // Wait for all FFmpeg splits to finish
+  await Promise.all(chunks.map(c => c.promise))
+  onProgress(5, `${totalChunks} partes prontas. Transcrevendo em paralelo (${Math.min(totalChunks, MAX_WORKERS)} workers)...`)
+
+  // Run Whisper in parallel with concurrency limit
+  const chunkResults: { offsetSeconds: number; segments: Segment[] }[] = []
+  let completed = 0
+  const queue = [...chunks]
+
+  async function runWorker(): Promise<void> {
+    while (queue.length > 0) {
+      const chunk = queue.shift()!
+      const segs = await transcribeChunk(whisperBin, modelPath, language, chunk.chunkPath, chunk.offsetSeconds)
+      chunkResults.push({ offsetSeconds: chunk.offsetSeconds, segments: segs })
+      completed++
+      const pct = Math.round(5 + (completed / totalChunks) * 90)
+      onProgress(pct, `Transcrito ${completed}/${totalChunks} partes...`)
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(MAX_WORKERS, totalChunks) }, () => runWorker())
+  await Promise.all(workers)
+
+  let merged = mergeChunkSegments(chunkResults)
+
+  if (globalOffset > 0) {
+    merged = merged.map(s => ({
+      ...s,
+      start_time: s.start_time + globalOffset,
+      end_time: s.end_time + globalOffset,
+    }))
+  }
+
+  return merged
+}
+
 export function registerTranscriptHandlers(ipcMain: IpcMain): void {
   // Probe media duration in seconds via FFmpeg stderr output.
   ipcMain.handle('media:getDuration', (_event, filePath: string) => {
@@ -166,14 +307,16 @@ export function registerTranscriptHandlers(ipcMain: IpcMain): void {
     db.prepare('UPDATE episodes SET status = ? WHERE id = ?').run('transcribing', episodeId)
     sendProgress(win, 0, 'Iniciando transcrição...')
 
-    // Use the pre-extracted project audio when available (imported flow).
-    // Only re-run FFmpeg if a start offset is requested or no pre-extracted audio exists.
+    const ffmpeg = getFFmpeg()
     const preExtracted = episode.audio_path && existsSync(episode.audio_path) ? episode.audio_path : null
+    const source = preExtracted ?? episode.file_path
+    const alreadyClean = Boolean(preExtracted)
+
+    // Prepare the audio source (extract/cut if needed)
     let audioPath = preExtracted ?? episode.file_path
     let tempWav: string | null = null
 
     if (startSeconds > 0 || endSeconds !== undefined || !preExtracted) {
-      const source = preExtracted ?? episode.file_path
       const fromLabel = startSeconds > 0 ? ` de ${new Date(startSeconds * 1000).toISOString().slice(11, 19)}` : ''
       const toLabel = endSeconds !== undefined ? ` até ${new Date(endSeconds * 1000).toISOString().slice(11, 19)}` : ''
       if (!preExtracted) {
@@ -183,7 +326,7 @@ export function registerTranscriptHandlers(ipcMain: IpcMain): void {
       }
       tempWav = join(tmpdir(), `talkeando_${episodeId}_${Date.now()}.wav`)
       try {
-        await extractAudio(getFFmpeg(), source, tempWav, startSeconds, endSeconds, Boolean(preExtracted))
+        await extractAudio(ffmpeg, source, tempWav, startSeconds, endSeconds, alreadyClean)
         audioPath = tempWav
       } catch (err) {
         db.prepare('UPDATE episodes SET status = ? WHERE id = ?').run('imported', episodeId)
@@ -191,76 +334,77 @@ export function registerTranscriptHandlers(ipcMain: IpcMain): void {
       }
     }
 
-    return new Promise((resolve, reject) => {
-      let stdoutBuf = ''
-      let stderrBuf = ''
+    try {
+      const duration = endSeconds !== undefined
+        ? (endSeconds - startSeconds)
+        : await probeDuration(ffmpeg, audioPath)
 
-      // NOTE: no --translate flag — always transcribe in the original language.
-      // -l auto lets Whisper detect PT / EN / ES automatically from the first ~30 s of audio.
-      const proc = spawn(whisperBin, [
-        '-m', modelPath,
-        '-f', audioPath,
-        '-l', language,  // 'auto' | 'pt' | 'en' | ...
-        '-pp',           // print progress % to stderr
-      ])
+      // Use parallel chunked transcription for audio longer than one chunk
+      const useParallel = duration > CHUNK_DURATION + OVERLAP
+      let segments: Segment[]
 
-      proc.stdout.on('data', (data: Buffer) => { stdoutBuf += data.toString() })
-      proc.stderr.on('data', (data: Buffer) => {
-        stderrBuf += data.toString()
-        const progressMatch = data.toString().match(/progress\s*=\s*(\d+)%/)
-        if (progressMatch) {
-          sendProgress(win, parseInt(progressMatch[1], 10), `Transcrevendo... ${progressMatch[1]}%`)
-        }
-      })
+      if (useParallel) {
+        sendProgress(win, 0, `Áudio de ${Math.round(duration / 60)} min — usando transcrição paralela...`)
+        segments = await runParallelTranscription(
+          ffmpeg, whisperBin, modelPath, language,
+          audioPath, duration, episodeId, alreadyClean, startSeconds,
+          (pct, msg) => sendProgress(win, pct, msg),
+        )
+      } else {
+        // Single-process path for short audio
+        segments = await new Promise<Segment[]>((resolve, reject) => {
+          let stdoutBuf = ''
+          let stderrBuf = ''
+          const proc = spawn(whisperBin, [
+            '-m', modelPath, '-f', audioPath, '-l', language, '-pp',
+          ])
+          proc.stdout.on('data', (d: Buffer) => { stdoutBuf += d.toString() })
+          proc.stderr.on('data', (d: Buffer) => {
+            stderrBuf += d.toString()
+            const m = d.toString().match(/progress\s*=\s*(\d+)%/)
+            if (m) sendProgress(win, parseInt(m[1], 10), `Transcrevendo... ${m[1]}%`)
+          })
+          proc.on('close', (code) => {
+            if (code !== 0) {
+              reject(new Error(`Whisper encerrou com código ${code}.\nStderr: ${stderrBuf.slice(-400)}`))
+              return
+            }
+            const raw = parseWhisperOutput(stdoutBuf)
+            const shifted = startSeconds > 0
+              ? raw.map(s => ({ ...s, start_time: s.start_time + startSeconds, end_time: s.end_time + startSeconds }))
+              : raw
+            resolve(shifted)
+          })
+          proc.on('error', reject)
+        })
+      }
 
-      proc.on('close', (code) => {
-        if (tempWav) try { unlinkSync(tempWav) } catch {}
+      if (tempWav) try { unlinkSync(tempWav) } catch {}
 
-        if (code !== 0) {
-          db.prepare('UPDATE episodes SET status = ? WHERE id = ?').run('imported', episodeId)
-          reject(new Error(`Whisper encerrou com código ${code}.\nStderr: ${stderrBuf.slice(-400)}`))
-          return
-        }
-
-        const rawSegments = parseWhisperOutput(stdoutBuf)
-
-        // Shift timestamps back to absolute positions when a start offset was used
-        const segments = startSeconds > 0
-          ? rawSegments.map((s) => ({ ...s, start_time: s.start_time + startSeconds, end_time: s.end_time + startSeconds }))
-          : rawSegments
-
-        if (segments.length === 0) {
-          db.prepare('UPDATE episodes SET status = ? WHERE id = ?').run('imported', episodeId)
-          reject(new Error(`Transcrição vazia.\nStdout (primeiros 300 chars): ${stdoutBuf.slice(0, 300) || '(vazio)'}\nStderr (últimos 300): ${stderrBuf.slice(-300)}`))
-          return
-        }
-
-        // Verify episode still exists before writing — user may have deleted it while Whisper ran
-        const stillExists = db.prepare('SELECT id FROM episodes WHERE id = ?').get(episodeId)
-        if (!stillExists) {
-          reject(new Error('Episódio foi removido durante a transcrição.'))
-          return
-        }
-
-        sendProgress(win, 98, `Salvando ${segments.length} segmentos...`)
-        db.prepare('DELETE FROM transcripts WHERE episode_id = ?').run(episodeId)
-
-        const insert = db.prepare('INSERT INTO transcripts (episode_id, start_time, end_time, text) VALUES (?, ?, ?, ?)')
-        db.transaction((segs: typeof segments) => {
-          for (const seg of segs) insert.run(episodeId, seg.start_time, seg.end_time, seg.text)
-        })(segments)
-
-        db.prepare('UPDATE episodes SET status = ? WHERE id = ?').run('transcribed', episodeId)
-        sendProgress(win, 100, `Transcrição concluída! ${segments.length} segmentos.`)
-        resolve({ success: true, segmentCount: segments.length })
-      })
-
-      proc.on('error', (err) => {
-        if (tempWav) try { unlinkSync(tempWav) } catch {}
+      if (segments.length === 0) {
         db.prepare('UPDATE episodes SET status = ? WHERE id = ?').run('imported', episodeId)
-        reject(err)
-      })
-    })
+        throw new Error('Transcrição vazia — nenhum segmento de fala detectado.')
+      }
+
+      const stillExists = db.prepare('SELECT id FROM episodes WHERE id = ?').get(episodeId)
+      if (!stillExists) throw new Error('Episódio foi removido durante a transcrição.')
+
+      sendProgress(win, 98, `Salvando ${segments.length} segmentos...`)
+      db.prepare('DELETE FROM transcripts WHERE episode_id = ?').run(episodeId)
+
+      const insert = db.prepare('INSERT INTO transcripts (episode_id, start_time, end_time, text) VALUES (?, ?, ?, ?)')
+      db.transaction((segs: typeof segments) => {
+        for (const seg of segs) insert.run(episodeId, seg.start_time, seg.end_time, seg.text)
+      })(segments)
+
+      db.prepare('UPDATE episodes SET status = ? WHERE id = ?').run('transcribed', episodeId)
+      sendProgress(win, 100, `Transcrição concluída! ${segments.length} segmentos.`)
+      return { success: true, segmentCount: segments.length }
+    } catch (err) {
+      if (tempWav) try { unlinkSync(tempWav) } catch {}
+      db.prepare('UPDATE episodes SET status = ? WHERE id = ?').run('imported', episodeId)
+      throw err
+    }
   })
 
   ipcMain.handle('transcripts:updateSegment', (_event, id: number, text: string) => {

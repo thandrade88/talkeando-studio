@@ -4,7 +4,7 @@ vi.mock('electron')
 vi.mock('better-sqlite3')
 vi.mock('ffmpeg-static', () => ({ default: '/usr/bin/ffmpeg' }))
 
-import { parseWhisperOutput, timeToSeconds } from '../../electron/services/transcriptEngine'
+import { parseWhisperOutput, timeToSeconds, mergeChunkSegments } from '../../electron/services/transcriptEngine'
 
 describe('timeToSeconds', () => {
   it('converts zero timestamp', () => {
@@ -116,5 +116,105 @@ whisper_print_timings: total time = 456.78 ms
     const result = parseWhisperOutput(output)
     expect(result).toHaveLength(1)
     expect(result[0].text).toBe('[música] Olá a todos')
+  })
+})
+
+describe('mergeChunkSegments', () => {
+  it('returns empty array for no chunks', () => {
+    expect(mergeChunkSegments([])).toEqual([])
+  })
+
+  it('returns segments as-is for a single chunk', () => {
+    const segments = [
+      { start_time: 0, end_time: 5, text: 'Hello' },
+      { start_time: 5, end_time: 10, text: 'World' },
+    ]
+    expect(mergeChunkSegments([{ offsetSeconds: 0, segments }])).toEqual(segments)
+  })
+
+  it('drops segments from later chunks that fall within the overlap window', () => {
+    const chunk1 = {
+      offsetSeconds: 0,
+      segments: [
+        { start_time: 0, end_time: 150, text: 'First half' },
+        { start_time: 150, end_time: 305, text: 'Crosses into overlap' },
+      ],
+    }
+    const chunk2 = {
+      offsetSeconds: 300,
+      segments: [
+        { start_time: 302, end_time: 308, text: 'Duplicate in overlap' },
+        { start_time: 310, end_time: 450, text: 'New content' },
+        { start_time: 450, end_time: 600, text: 'More content' },
+      ],
+    }
+    const merged = mergeChunkSegments([chunk1, chunk2])
+
+    expect(merged).toHaveLength(4)
+    expect(merged[0].text).toBe('First half')
+    expect(merged[1].text).toBe('Crosses into overlap')
+    expect(merged[2].text).toBe('New content')
+    expect(merged[3].text).toBe('More content')
+  })
+
+  it('sorts final segments by start_time', () => {
+    const chunk1 = {
+      offsetSeconds: 0,
+      segments: [{ start_time: 50, end_time: 100, text: 'B' }],
+    }
+    const chunk2 = {
+      offsetSeconds: 300,
+      segments: [{ start_time: 320, end_time: 400, text: 'C' }],
+    }
+    // Feed them out of order
+    const merged = mergeChunkSegments([chunk2, chunk1])
+
+    expect(merged[0].text).toBe('B')
+    expect(merged[1].text).toBe('C')
+  })
+
+  it('keeps first chunk segments regardless of overlap boundary', () => {
+    const chunk1 = {
+      offsetSeconds: 0,
+      segments: [
+        { start_time: 0, end_time: 5, text: 'A' },
+        { start_time: 5, end_time: 8, text: 'B' },
+      ],
+    }
+    const merged = mergeChunkSegments([chunk1])
+    expect(merged).toHaveLength(2)
+  })
+
+  it('handles three chunks with cascading overlaps', () => {
+    const chunk1 = {
+      offsetSeconds: 0,
+      segments: [
+        { start_time: 0, end_time: 290, text: 'Chunk 1' },
+        { start_time: 290, end_time: 308, text: 'Chunk 1 tail' },
+      ],
+    }
+    const chunk2 = {
+      offsetSeconds: 300,
+      segments: [
+        { start_time: 303, end_time: 309, text: 'Overlap - should drop' },
+        { start_time: 311, end_time: 590, text: 'Chunk 2 main' },
+        { start_time: 590, end_time: 609, text: 'Chunk 2 tail' },
+      ],
+    }
+    const chunk3 = {
+      offsetSeconds: 600,
+      segments: [
+        { start_time: 605, end_time: 608, text: 'Overlap 2 - should drop' },
+        { start_time: 615, end_time: 900, text: 'Chunk 3 main' },
+      ],
+    }
+    const merged = mergeChunkSegments([chunk1, chunk2, chunk3])
+
+    const texts = merged.map(s => s.text)
+    expect(texts).toEqual([
+      'Chunk 1', 'Chunk 1 tail',
+      'Chunk 2 main', 'Chunk 2 tail',
+      'Chunk 3 main',
+    ])
   })
 })
