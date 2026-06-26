@@ -1061,6 +1061,13 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
   const [uploadError, setUploadError]       = useState<string | null>(null)
   const [privacyStatus, setPrivacyStatus]   = useState<'private' | 'unlisted' | 'public'>('private')
 
+  // OpusClip upload
+  const [opusConfigured, setOpusConfigured] = useState(false)
+  const [opusUploading, setOpusUploading]   = useState(false)
+  const [opusPct, setOpusPct]               = useState(0)
+  const [opusMsg, setOpusMsg]               = useState<string | null>(null)
+  const [opusDashUrl, setOpusDashUrl]       = useState<string | null>(null)
+
   const selected    = clips.find(c => c.id === selectedId)
   const isDirtyClip = selected && (editStart !== selected.start_time || editEnd !== selected.end_time)
 
@@ -1083,6 +1090,24 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
     })
     return window.api.onYouTubeUploadProgress(pct => setUploadPct(pct))
   }, [])
+
+  useEffect(() => {
+    window.api.isOpusClipConfigured().then(setOpusConfigured)
+    return window.api.onOpusClipProgress((msg, pct) => { setOpusMsg(msg); setOpusPct(pct) })
+  }, [])
+
+  async function sendToOpusClip(clip: Clip) {
+    if (!clip.file_path) return
+    setOpusUploading(true); setOpusMsg(null); setOpusDashUrl(null); setOpusPct(0)
+    try {
+      const result = await window.api.sendToOpusClip(clip.id)
+      setOpusDashUrl(result.dashboardUrl)
+    } catch (err) {
+      setOpusMsg(err instanceof Error ? err.message : String(err))
+    } finally {
+      setOpusUploading(false)
+    }
+  }
 
   async function uploadClip(clip: Clip) {
     if (!ytCutsChId || !clip.file_path) return
@@ -1419,10 +1444,31 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
                     <option value="public">Público</option>
                   </select>
                 )}
+                {opusConfigured && selected && (
+                  opusDashUrl ? (
+                    <button onClick={() => window.api.openExternal(opusDashUrl)}
+                      className="flex items-center gap-1.5 text-sm px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-md">
+                      <ExternalLink className="w-3.5 h-3.5" />OpusClip
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => sendToOpusClip(selected)}
+                      disabled={opusUploading || !selected.file_path}
+                      title={!selected.file_path ? 'Exporte o clipe antes de enviar ao OpusClip' : undefined}
+                      className="flex items-center gap-1.5 text-sm px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-md disabled:opacity-50">
+                      {opusUploading
+                        ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />{opusPct}%</>
+                        : <><Upload className="w-3.5 h-3.5" />OpusClip</>}
+                    </button>
+                  )
+                )}
               </div>
             </div>
             {uploadError && (
               <p className="px-6 py-2 text-xs text-destructive bg-destructive/10 shrink-0">{uploadError}</p>
+            )}
+            {opusMsg && (
+              <p className="px-6 py-2 text-xs text-destructive bg-destructive/10 shrink-0">{opusMsg}</p>
             )}
             <div className="flex-1 overflow-y-auto p-5">
               <div className="grid grid-cols-[7fr_3fr] gap-4 h-full">

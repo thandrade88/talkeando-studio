@@ -97,6 +97,16 @@ const api = {
   // Media server
   getMediaServerPort: () => ipcRenderer.invoke('media:serverPort') as Promise<number>,
 
+  // OpusClip
+  isOpusClipConfigured: () => ipcRenderer.invoke('opusclip:isConfigured') as Promise<boolean>,
+  sendToOpusClip: (clipId: number) =>
+    ipcRenderer.invoke('opusclip:sendClip', clipId) as Promise<{ projectId: string; dashboardUrl: string }>,
+  onOpusClipProgress: (cb: (msg: string, pct: number) => void) => {
+    const handler = (_: unknown, msg: string, pct: number) => cb(msg, pct)
+    ipcRenderer.on('opusclip:progress', handler)
+    return () => ipcRenderer.removeListener('opusclip:progress', handler)
+  },
+
   // First run
   checkSetupComplete: () => ipcRenderer.invoke('setup:isComplete'),
   shouldShowSetup: () => ipcRenderer.invoke('setup:shouldShow'),

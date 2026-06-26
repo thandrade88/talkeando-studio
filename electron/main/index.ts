@@ -114,6 +114,7 @@ import { registerWhisperSetupHandlers } from '../services/whisperSetup'
 import { registerFirstRunHandlers } from '../services/firstRunSetup'
 import { registerYouTubeHandlers } from '../services/youtubeService'
 import { registerWordPressHandlers } from '../services/wordpressService'
+import { registerOpusClipHandlers } from '../services/opusClipService'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -218,6 +219,7 @@ app.whenReady().then(async () => {
   registerFirstRunHandlers()
   registerYouTubeHandlers(ipcMain)
   registerWordPressHandlers(ipcMain)
+  registerOpusClipHandlers(ipcMain)
 
   createWindow()
 

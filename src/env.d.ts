@@ -78,6 +78,11 @@ interface Window {
 
     getMediaServerPort: () => Promise<number>
 
+    // OpusClip
+    isOpusClipConfigured: () => Promise<boolean>
+    sendToOpusClip: (clipId: number) => Promise<{ projectId: string; dashboardUrl: string }>
+    onOpusClipProgress: (cb: (msg: string, pct: number) => void) => () => void
+
     checkSetupComplete: () => Promise<boolean>
     shouldShowSetup: () => Promise<boolean>
     markSetupComplete: () => Promise<{ success: boolean }>
