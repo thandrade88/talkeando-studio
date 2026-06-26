@@ -8,7 +8,10 @@ interface AppState {
 
   // Transcription that survives route navigation (runs in main process)
   transcribingEpisodeId: number | null
-  transcriptionStartedAt: number | null   // Date.now() when transcription kicked off
+  transcriptionStartedAt: number | null
+  txProgress: number
+  txStatus: string
+  txEta: string | null
 
   setEpisodes: (episodes: Episode[]) => void
   addEpisode: (episode: Episode) => void
@@ -18,6 +21,7 @@ interface AppState {
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
   setTranscribingEpisode: (id: number | null, startedAt?: number) => void
+  setTxProgress: (progress: number, status: string, eta: string | null) => void
 
   loadEpisodes: () => Promise<void>
 }
@@ -29,6 +33,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   error: null,
   transcribingEpisodeId: null,
   transcriptionStartedAt: null,
+  txProgress: 0,
+  txStatus: '',
+  txEta: null,
 
   setEpisodes: (episodes) => set({ episodes }),
   addEpisode: (episode) => set((s) => ({ episodes: [episode, ...s.episodes] })),
@@ -40,7 +47,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   setLoading: (isLoading) => set({ isLoading }),
   setError: (error) => set({ error }),
   setTranscribingEpisode: (id, startedAt) =>
-    set({ transcribingEpisodeId: id, transcriptionStartedAt: startedAt ?? null }),
+    set({ transcribingEpisodeId: id, transcriptionStartedAt: startedAt ?? null, txProgress: 0, txStatus: '', txEta: null }),
+  setTxProgress: (progress, status, eta) =>
+    set({ txProgress: progress, txStatus: status, txEta: eta }),
 
   loadEpisodes: async () => {
     set({ isLoading: true, error: null })

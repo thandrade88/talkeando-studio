@@ -6,9 +6,16 @@ import Dashboard from './pages/Dashboard'
 import EpisodeWorkspace from './pages/EpisodeWorkspace'
 import Settings from './pages/Settings'
 import { useAppStore } from './store/useAppStore'
+import { formatEta } from './lib/utils'
 
 export default function App() {
   const loadEpisodes = useAppStore((s) => s.loadEpisodes)
+  const transcribingEpisodeId  = useAppStore(s => s.transcribingEpisodeId)
+  const transcriptionStartedAt = useAppStore(s => s.transcriptionStartedAt)
+  const setTranscribingEpisode = useAppStore(s => s.setTranscribingEpisode)
+  const setTxProgress          = useAppStore(s => s.setTxProgress)
+  const updateEpisode          = useAppStore(s => s.updateEpisode)
+
   const [showSetup, setShowSetup] = useState(false)
   const [setupChecked, setSetupChecked] = useState(false)
 
@@ -19,6 +26,24 @@ export default function App() {
     })
     loadEpisodes()
   }, [loadEpisodes])
+
+  // Global transcription progress listener — survives all navigation
+  useEffect(() => {
+    return window.api.onTranscriptionProgress((prog, status) => {
+      const startedAt = useAppStore.getState().transcriptionStartedAt
+      let eta: string | null = null
+      if (prog > 3 && prog < 100 && startedAt) {
+        const elapsed = (Date.now() - startedAt) / 1000
+        eta = formatEta((elapsed * (100 - prog)) / prog)
+      }
+      setTxProgress(prog, status, eta)
+      if (prog >= 100) {
+        const epId = useAppStore.getState().transcribingEpisodeId
+        setTranscribingEpisode(null)
+        if (epId) window.api.getEpisode(epId).then(ep => { if (ep) updateEpisode(ep) })
+      }
+    })
+  }, [])
 
   if (!setupChecked) return null
 
