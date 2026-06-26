@@ -20,11 +20,6 @@ function parseTimestamp(v: string): number | null {
   return null
 }
 
-function formatEta(s: number) {
-  if (s < 10) return 'menos de 10s'
-  if (s < 60) return `~${Math.round(s)}s`
-  return `~${Math.ceil(s / 60)} min`
-}
 
 function parseStartTime(v: string): number {
   const p = v.trim().split(':').map(Number)
@@ -538,7 +533,7 @@ function ContentTab({ episodeId }: { episodeId: number }) {
   const [igPromptSaved, setIgPromptSaved]       = useState(false)
   const defaultIgPromptRef = useRef<string>('')
 
-  // WordPress publishing
+  // WordPress publishing & post linking
   const [wpPostId, setWpPostId]             = useState<number | null>(null)
   const [wpPublishing, setWpPublishing]     = useState(false)
   const [wpResult, setWpResult]             = useState<string | null>(null)
@@ -891,7 +886,7 @@ function ContentTab({ episodeId }: { episodeId: number }) {
                 <button onClick={publishBlogPost} disabled={wpPublishing}
                   className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg disabled:opacity-50">
                   {wpPublishing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Globe className="w-3 h-3" />}
-                  {wpPostId ? 'Atualizar no WordPress' : 'Publicar no WordPress'}
+                  {wpPostId ? 'Atualizar no WordPress' : 'Criar post no WordPress'}
                 </button>
               )}
               {contentType === 'youtube' && ytVideoId && (
@@ -1028,6 +1023,13 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
   const [isSavingClip, setIsSavingClip]   = useState(false)
   const [mediaDuration, setMediaDuration] = useState(episode.duration || 0)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const pendingSeekRef = useRef<number | null>(null)
+
+  // Local HTTP media server port (avoids Electron protocol.handle 2GB mojo overflow)
+  const [mediaPort, setMediaPort] = useState(0)
+  useEffect(() => { window.api.getMediaServerPort().then(setMediaPort) }, [])
+  const toMediaUrl = (fp: string) =>
+    mediaPort ? `http://127.0.0.1:${mediaPort}/?p=${encodeURIComponent(fp)}` : ''
 
   // Vertical (9:16) preview, manually recentered on the speaker
   const verticalVideoRef = useRef<HTMLVideoElement>(null)
@@ -1117,10 +1119,15 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
     setTitleDraft(selected.title ?? '')
     setSummaryDraft(selected.summary ?? ''); setSummaryError(null)
     setVCropX(50); setVZoom(1)
-    setTimeout(() => {
-      if (videoRef.current) videoRef.current.currentTime = selected.start_time
-      if (verticalVideoRef.current) verticalVideoRef.current.currentTime = selected.start_time
-    }, 50)
+    const seekTo = selected.start_time
+    const video = videoRef.current
+    if (video && video.readyState >= 1) {
+      video.currentTime = seekTo
+      if (verticalVideoRef.current) verticalVideoRef.current.currentTime = seekTo
+      pendingSeekRef.current = null
+    } else {
+      pendingSeekRef.current = seekTo
+    }
   }, [selectedId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function saveClipBounds() {
@@ -1428,10 +1435,18 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
                     <div className="aspect-video bg-black rounded-xl border border-border overflow-hidden">
                       <video
                         ref={videoRef}
-                        src={`app-media://${episode.file_path}`}
+                        src={toMediaUrl(episode.file_path)}
                         controls
+                        preload="metadata"
                         className="w-full h-full"
-                        onLoadedMetadata={e => setMediaDuration(e.currentTarget.duration || episode.duration || 0)}
+                        onLoadedMetadata={e => {
+                          setMediaDuration(e.currentTarget.duration || episode.duration || 0)
+                          if (pendingSeekRef.current !== null) {
+                            e.currentTarget.currentTime = pendingSeekRef.current
+                            if (verticalVideoRef.current) verticalVideoRef.current.currentTime = pendingSeekRef.current
+                            pendingSeekRef.current = null
+                          }
+                        }}
                         onPlay={() => verticalVideoRef.current?.play().catch(() => {})}
                         onPause={() => verticalVideoRef.current?.pause()}
                         onSeeked={e => { if (verticalVideoRef.current) verticalVideoRef.current.currentTime = e.currentTarget.currentTime }}
@@ -1563,8 +1578,9 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
                       <div className="aspect-[9/16] bg-black rounded-lg border border-border overflow-hidden">
                         <video
                           ref={verticalVideoRef}
-                          src={`app-media://${episode.file_path}`}
+                          src={toMediaUrl(episode.file_path)}
                           muted playsInline
+                          preload="metadata"
                           className="w-full h-full object-cover"
                           style={{ objectPosition: `${vCropX}% center`, transform: `scale(${vZoom})` }}
                         />
@@ -1663,17 +1679,15 @@ export default function EpisodeWorkspace() {
   const episodes  = useAppStore(s => s.episodes)
   const selectEpisode          = useAppStore(s => s.selectEpisode)
   const transcribingEpisodeId  = useAppStore(s => s.transcribingEpisodeId)
-  const transcriptionStartedAt = useAppStore(s => s.transcriptionStartedAt)
-  const setTranscribingEpisode = useAppStore(s => s.setTranscribingEpisode)
+  const txProgress             = useAppStore(s => s.txProgress)
+  const txStatus               = useAppStore(s => s.txStatus)
+  const txEta                  = useAppStore(s => s.txEta)
   const updateEpisode          = useAppStore(s => s.updateEpisode)
 
   const episodeId = id ? parseInt(id) : null
   const episode   = episodes.find(e => e.id === episodeId)
 
   const [tab, setTab] = useState<Tab>('transcricao')
-  const [txProgress, setTxProgress]   = useState(0)
-  const [txStatus, setTxStatus]       = useState('')
-  const [txEta, setTxEta]             = useState<string | null>(null)
 
   const [ytVideos, setYtVideos]       = useState<YouTubeVideo[]>([])
   const [ytVideoId, setYtVideoId]     = useState('')
@@ -1688,6 +1702,18 @@ export default function EpisodeWorkspace() {
   const ytSearchRef = useRef<HTMLDivElement>(null)
   const ytDebounceRef = useRef<ReturnType<typeof setTimeout>>()
 
+  // WordPress — workspace-level, same pattern as YouTube
+  const [wpConnected, setWpConnected]         = useState(false)
+  const [wpPosts, setWpPosts]                 = useState<WordPressPost[]>([])
+  const [wpPostId, setWpPostId]               = useState<number | null>(null)
+  const [wpSelectedPost, setWpSelectedPost]   = useState<WordPressPost | null>(null)
+  const [wpSaved, setWpSaved]                 = useState(false)
+  const [wpSearch, setWpSearch]               = useState('')
+  const [wpDropOpen, setWpDropOpen]           = useState(false)
+  const [wpSearching, setWpSearching]         = useState(false)
+  const wpSearchRef = useRef<HTMLDivElement>(null)
+  const wpDebounceRef = useRef<ReturnType<typeof setTimeout>>()
+
   useEffect(() => {
     if (!episodeId) return
     selectEpisode(episodeId)
@@ -1696,24 +1722,6 @@ export default function EpisodeWorkspace() {
       setTab('conteudo')
     }
   }, [episodeId])
-
-  // Transcription progress listener lives here so it survives tab switches
-  useEffect(() => {
-    if (!episodeId) return
-    return window.api.onTranscriptionProgress((prog, status) => {
-      setTxProgress(prog)
-      setTxStatus(status)
-      if (prog > 3 && prog < 100 && transcriptionStartedAt) {
-        const elapsed = (Date.now() - transcriptionStartedAt) / 1000
-        setTxEta(formatEta((elapsed * (100 - prog)) / prog))
-      }
-      if (prog >= 100) {
-        setTxEta(null)
-        setTranscribingEpisode(null)
-        window.api.getEpisode(episodeId).then(ep => { if (ep) updateEpisode(ep) })
-      }
-    })
-  }, [episodeId, transcriptionStartedAt])
 
   useEffect(() => {
     if (!episodeId) return
@@ -1742,6 +1750,45 @@ export default function EpisodeWorkspace() {
       finally { setYtLoading(false) }
     })
   }, [episodeId])
+
+  // WordPress: load connection + linked post
+  useEffect(() => {
+    if (!episodeId) return
+    window.api.isWordPressConfigured().then(async configured => {
+      if (!configured) return
+      try {
+        await window.api.testWordPressConnection()
+        setWpConnected(true)
+        const savedId = await window.api.getSetting(`episode_${episodeId}_wp_post_id`)
+        if (savedId) {
+          setWpPostId(Number(savedId))
+          try {
+            const post = await window.api.getWordPressPost(Number(savedId))
+            setWpSelectedPost(post)
+          } catch {
+            setWpSelectedPost({ postId: Number(savedId), title: `Post #${savedId}`, content: '', excerpt: '', modifiedAt: '', link: '', status: 'draft', slug: '' })
+          }
+        }
+      } catch { setWpConnected(false) }
+    })
+  }, [episodeId])
+
+  // WordPress: debounced search
+  useEffect(() => {
+    if (!wpConnected) return
+    clearTimeout(wpDebounceRef.current)
+    if (!wpSearch.trim()) {
+      setWpSearching(true)
+      window.api.listWordPressPosts().then(setWpPosts).catch(() => {}).finally(() => setWpSearching(false))
+      return
+    }
+    setWpSearching(true)
+    wpDebounceRef.current = setTimeout(() => {
+      window.api.listWordPressPosts(wpSearch.trim())
+        .then(setWpPosts).catch(() => {}).finally(() => setWpSearching(false))
+    }, 400)
+    return () => clearTimeout(wpDebounceRef.current)
+  }, [wpSearch, wpConnected])
 
   useEffect(() => {
     if (!ytMainChId) return
@@ -1782,6 +1829,7 @@ export default function EpisodeWorkspace() {
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (ytSearchRef.current && !ytSearchRef.current.contains(e.target as Node)) setYtDropOpen(false)
+      if (wpSearchRef.current && !wpSearchRef.current.contains(e.target as Node)) setWpDropOpen(false)
     }
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
@@ -1911,6 +1959,108 @@ export default function EpisodeWorkspace() {
         </div>
       )}
 
+      {/* WordPress episode link */}
+      {wpConnected && (
+        <div className="flex items-center gap-3 px-4 py-2 border-b border-border shrink-0">
+          <Globe className="w-4 h-4 text-blue-400 shrink-0" />
+          <div className="relative flex-1" ref={wpSearchRef}>
+            {wpPostId && !wpDropOpen ? (
+              <div className="flex items-center gap-2 bg-secondary border border-border rounded-lg px-2 py-1 text-xs">
+                <span className={cn('w-1.5 h-1.5 rounded-full shrink-0',
+                  wpSelectedPost?.status === 'publish' ? 'bg-green-400' : 'bg-yellow-400'
+                )} />
+                <span className="flex-1 truncate text-xs font-medium">
+                  {wpSelectedPost?.title ?? `Post #${wpPostId}`}
+                </span>
+                <button onClick={() => { setWpDropOpen(true); setWpSearch('') }}
+                  className="text-muted-foreground hover:text-foreground shrink-0">
+                  <Search className="w-3 h-3" />
+                </button>
+                <button onClick={async () => {
+                  setWpPostId(null); setWpSelectedPost(null)
+                  if (episodeId) await window.api.unlinkWordPressPost(episodeId)
+                }} className="text-muted-foreground hover:text-destructive shrink-0">
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center bg-secondary border border-border rounded-lg px-3 py-1.5 gap-2">
+                  <Search className="w-3 h-3 text-muted-foreground shrink-0" />
+                  <input
+                    type="text"
+                    value={wpSearch}
+                    onChange={e => { setWpSearch(e.target.value); setWpDropOpen(true) }}
+                    onFocus={() => setWpDropOpen(true)}
+                    placeholder="Buscar post no WordPress…"
+                    className="flex-1 bg-transparent text-xs focus:outline-none placeholder:text-muted-foreground/50"
+                    autoFocus={wpDropOpen}
+                  />
+                  {wpSearch && (
+                    <button onClick={() => setWpSearch('')} className="text-muted-foreground hover:text-foreground shrink-0">
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+                {wpDropOpen && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto">
+                    {wpSearching && (
+                      <div className="flex items-center justify-center py-3">
+                        <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                      </div>
+                    )}
+                    {!wpSearching && wpPosts.map(p => (
+                      <button
+                        key={p.postId}
+                        onClick={async () => {
+                          setWpPostId(p.postId)
+                          setWpSelectedPost(p)
+                          setWpDropOpen(false)
+                          setWpSearch('')
+                          if (episodeId) {
+                            await window.api.linkWordPressPost(episodeId, p.postId)
+                            setWpSaved(true); setTimeout(() => setWpSaved(false), 2000)
+                          }
+                        }}
+                        className={cn(
+                          'flex items-center gap-3 w-full px-3 py-2 text-left hover:bg-secondary/80 transition-colors',
+                          p.postId === wpPostId && 'bg-primary/10'
+                        )}
+                      >
+                        <span className={cn('w-1.5 h-1.5 rounded-full shrink-0',
+                          p.status === 'publish' ? 'bg-green-400' : 'bg-yellow-400'
+                        )} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium truncate">{p.title || '(sem título)'}</p>
+                          <p className="text-[11px] text-muted-foreground">
+                            {new Date(p.modifiedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                            {' · '}
+                            <span className={p.status === 'publish' ? 'text-green-400' : 'text-yellow-400'}>
+                              {p.status === 'publish' ? 'Publicado' : 'Rascunho'}
+                            </span>
+                          </p>
+                        </div>
+                      </button>
+                    ))}
+                    {!wpSearching && wpPosts.length === 0 && (
+                      <p className="px-3 py-3 text-xs text-muted-foreground text-center">Nenhum post encontrado</p>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+          {wpSaved && <Check className="w-3.5 h-3.5 text-primary shrink-0" />}
+          {wpPostId && !wpDropOpen && wpSelectedPost?.link && (
+            <button
+              onClick={() => window.api.openExternal(wpSelectedPost.link)}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground shrink-0">
+              <ExternalLink className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+      )}
+
       {/* tab bar */}
       <div className="flex border-b border-border shrink-0 px-4">
         {TABS.map(({ id: tabId, label, icon: Icon }) => (
@@ -1941,7 +2091,7 @@ export default function EpisodeWorkspace() {
           progress={txProgress}
           progressStatus={txStatus}
           eta={txEta}
-          onResetProgress={() => { setTxProgress(0); setTxStatus(''); setTxEta(null) }}
+          onResetProgress={() => useAppStore.getState().setTxProgress(0, '', null)}
         />
       )}
       {tab === 'conteudo'    && <ContentTab       episodeId={episodeId} />}

@@ -94,6 +94,9 @@ const api = {
   downloadFile: (filePath: string, defaultName?: string) =>
     ipcRenderer.invoke('files:downloadFile', filePath, defaultName),
 
+  // Media server
+  getMediaServerPort: () => ipcRenderer.invoke('media:serverPort') as Promise<number>,
+
   // First run
   checkSetupComplete: () => ipcRenderer.invoke('setup:isComplete'),
   shouldShowSetup: () => ipcRenderer.invoke('setup:shouldShow'),
@@ -150,13 +153,27 @@ const api = {
   },
 
   // WordPress
+  isWordPressConfigured: () => ipcRenderer.invoke('wordpress:isConfigured') as Promise<boolean>,
+  testWordPressConnection: (opts?: { url: string; user: string; appPassword: string }) =>
+    ipcRenderer.invoke('wordpress:testConnection', opts),
+  listWordPressPosts: (query?: string) =>
+    ipcRenderer.invoke('wordpress:listPosts', query),
+  getWordPressPost: (postId: number) =>
+    ipcRenderer.invoke('wordpress:getPost', postId),
+  linkWordPressPost: (episodeId: number, postId: number) =>
+    ipcRenderer.invoke('wordpress:linkPost', episodeId, postId),
+  unlinkWordPressPost: (episodeId: number) =>
+    ipcRenderer.invoke('wordpress:unlinkPost', episodeId),
   publishToWordPress: (opts: {
     episodeId: number; title: string; content: string;
     slug?: string; status?: 'draft' | 'publish'
   }) => ipcRenderer.invoke('wordpress:publish', opts),
   updateWordPressPost: (opts: {
-    postId: number; title: string; content: string; slug?: string
+    postId: number; title?: string; content?: string;
+    slug?: string; status?: 'draft' | 'publish'
   }) => ipcRenderer.invoke('wordpress:update', opts),
+  deleteWordPressPost: (postId: number) =>
+    ipcRenderer.invoke('wordpress:delete', postId),
 }
 
 if (process.contextIsolated) {
