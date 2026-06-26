@@ -120,7 +120,7 @@ interface Window {
     getWordPressPost: (postId: number) => Promise<WordPressPost>
     linkWordPressPost: (episodeId: number, postId: number) => Promise<{ success: boolean }>
     unlinkWordPressPost: (episodeId: number) => Promise<{ success: boolean }>
-    publishToWordPress: (opts: { episodeId: number; title: string; content: string; slug?: string; status?: 'draft' | 'publish' }) => Promise<{ postId: number; postUrl: string }>
+    publishToWordPress: (opts: { episodeId: number; title: string; content: string; slug?: string; status?: 'draft' | 'publish'; featuredImageUrl?: string }) => Promise<{ postId: number; postUrl: string }>
     updateWordPressPost: (opts: { postId: number; title?: string; content?: string; slug?: string; status?: 'draft' | 'publish' }) => Promise<WordPressPost>
     deleteWordPressPost: (postId: number) => Promise<{ success: boolean }>
   }

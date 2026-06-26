@@ -538,6 +538,7 @@ function ContentTab({ episodeId }: { episodeId: number }) {
   const [wpPublishing, setWpPublishing]     = useState(false)
   const [wpResult, setWpResult]             = useState<string | null>(null)
   const [wpError, setWpError]               = useState<string | null>(null)
+  const [wpSuccess, setWpSuccess]           = useState<string | null>(null)
 
   // YouTube metadata update
   const [ytVideoId, setYtVideoId]           = useState<string | null>(null)
@@ -607,7 +608,7 @@ function ContentTab({ episodeId }: { episodeId: number }) {
 
   async function publishBlogPost() {
     if (!activeContent || contentType !== 'blog_post') return
-    setWpPublishing(true); setWpError(null); setWpResult(null)
+    setWpPublishing(true); setWpError(null); setWpResult(null); setWpSuccess(null)
     try {
       let title = '', content = '', slug = ''
       try {
@@ -619,12 +620,23 @@ function ContentTab({ episodeId }: { episodeId: number }) {
         content = activeContent.content
       }
       if (wpPostId) {
-        const r = await window.api.updateWordPressPost({ postId: wpPostId, title, content, slug })
-        setWpResult(r.postUrl)
+        // Update: only sync content — never overwrite title or slug
+        const r = await window.api.updateWordPressPost({ postId: wpPostId, content })
+        setWpResult(r.link)
+        setWpSuccess('Conteúdo atualizado!')
+        setTimeout(() => setWpSuccess(null), 3000)
       } else {
-        const r = await window.api.publishToWordPress({ episodeId, title, content, slug, status: 'draft' })
+        // Create: set title, slug, content, and YouTube thumbnail as featured image
+        const featuredImageUrl = ytVideoId
+          ? `https://i.ytimg.com/vi/${ytVideoId}/maxresdefault.jpg`
+          : undefined
+        const r = await window.api.publishToWordPress({
+          episodeId, title, content, slug, status: 'draft', featuredImageUrl,
+        })
         setWpPostId(r.postId)
         setWpResult(r.postUrl)
+        setWpSuccess('Post criado!')
+        setTimeout(() => setWpSuccess(null), 3000)
       }
     } catch (err) {
       setWpError(err instanceof Error ? err.message : String(err))
@@ -885,8 +897,13 @@ function ContentTab({ episodeId }: { episodeId: number }) {
               {contentType === 'blog_post' && (
                 <button onClick={publishBlogPost} disabled={wpPublishing}
                   className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg disabled:opacity-50">
-                  {wpPublishing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Globe className="w-3 h-3" />}
-                  {wpPostId ? 'Atualizar no WordPress' : 'Criar post no WordPress'}
+                  {wpPublishing
+                    ? <><Loader2 className="w-3 h-3 animate-spin" />Enviando...</>
+                    : wpSuccess
+                      ? <><Check className="w-3 h-3" />{wpSuccess}</>
+                      : wpPostId
+                        ? <><Globe className="w-3 h-3" />Atualizar no WordPress</>
+                        : <><Globe className="w-3 h-3" />Criar post no WordPress</>}
                 </button>
               )}
               {contentType === 'youtube' && ytVideoId && (
