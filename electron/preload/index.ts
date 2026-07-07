@@ -116,6 +116,7 @@ const api = {
   getWhisperStatus: () => ipcRenderer.invoke('whisper:getStatus'),
   installWhisper: () => ipcRenderer.invoke('whisper:install'),
   downloadWhisperModel: (model: string) => ipcRenderer.invoke('whisper:downloadModel', model),
+  deleteWhisperModel: (model: string) => ipcRenderer.invoke('whisper:deleteModel', model),
   getWhisperModelsDir: () => ipcRenderer.invoke('whisper:getModelsDir'),
   onWhisperSetupStatus: (callback: (data: WhisperSetupStatus) => void) => {
     const handler = (_: unknown, data: WhisperSetupStatus) => callback(data)

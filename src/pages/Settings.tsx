@@ -11,6 +11,7 @@ import {
   Download,
   Loader2,
   CheckCircle2,
+  Trash2,
   Terminal,
   Sparkles,
   RotateCcw,
@@ -250,6 +251,15 @@ export default function Settings() {
       alert(`Erro ao baixar modelo: ${err}`)
     } finally {
       setDownloadingModel(null); setSetupStatus(null)
+    }
+  }
+
+  async function deleteModel(model: string) {
+    try {
+      await window.api.deleteWhisperModel(model)
+      await loadWhisperStatus()
+    } catch (err) {
+      alert(`Erro ao deletar modelo: ${err}`)
     }
   }
 
@@ -790,6 +800,7 @@ export default function Settings() {
                         setupStatus={setupStatus}
                         downloadingModel={downloadingModel}
                         onDownload={downloadModel}
+                        onDelete={deleteModel}
                         onModelChange={loadWhisperStatus}
                       />
                     </>
@@ -826,6 +837,7 @@ export default function Settings() {
                         setupStatus={setupStatus}
                         downloadingModel={downloadingModel}
                         onDownload={downloadModel}
+                        onDelete={deleteModel}
                         onModelChange={loadWhisperStatus}
                       />
                     </>
@@ -896,13 +908,14 @@ export default function Settings() {
 }
 
 function ModelsStep({
-  stepNumber, whisperStatus, setupStatus, downloadingModel, onDownload, onModelChange,
+  stepNumber, whisperStatus, setupStatus, downloadingModel, onDownload, onDelete, onModelChange,
 }: {
   stepNumber: number
   whisperStatus: WhisperStatus
   setupStatus: WhisperSetupStatus | null
   downloadingModel: string | null
   onDownload: (model: string) => void
+  onDelete: (model: string) => void
   onModelChange: () => void
 }) {
   return (
@@ -949,7 +962,17 @@ function ModelsStep({
                 )}
               </div>
               {m.downloaded ? (
-                <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />
+                <div className="flex items-center gap-2 shrink-0">
+                  <CheckCircle2 className="w-4 h-4 text-primary" />
+                  <button
+                    onClick={() => onDelete(m.key)}
+                    disabled={downloadingModel !== null}
+                    title="Deletar modelo"
+                    className="p-1 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive disabled:opacity-40 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               ) : (
                 <button onClick={() => onDownload(m.key)} disabled={isDownloading || isOtherDownloading}
                   className="flex items-center gap-1.5 text-xs bg-secondary hover:bg-secondary/70 border border-border px-2.5 py-1 rounded disabled:opacity-40 shrink-0">

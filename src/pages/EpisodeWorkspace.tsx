@@ -102,10 +102,16 @@ function TranscriptionTab({
     onResetProgress(); setTranscribeError(null)
     setTranscribingEpisode(episodeId, Date.now())
     const startSeconds = parseStartTime(startAtInput) || undefined
-    window.api.startTranscription(episodeId, startSeconds, undefined).catch(err => {
-      setTranscribingEpisode(null)
-      setTranscribeError(String(err).replace(/^Error:\s*/i, ''))
-    })
+    window.api.startTranscription(episodeId, startSeconds, undefined)
+      .then(() => {
+        // Load segments directly when the IPC call resolves — defense against any
+        // race between sendProgress(100) and the episodeStatus update in the store.
+        window.api.getTranscript(episodeId).then(setSegments)
+      })
+      .catch(err => {
+        setTranscribingEpisode(null)
+        setTranscribeError(String(err).replace(/^Error:\s*/i, ''))
+      })
   }
 
   async function saveSegment(segId: number) {

@@ -90,6 +90,7 @@ interface Window {
     getWhisperStatus: () => Promise<WhisperStatus>
     installWhisper: () => Promise<{ success: boolean; binaryPath?: string; message?: string }>
     downloadWhisperModel: (model: string) => Promise<{ success: boolean; modelPath?: string }>
+    deleteWhisperModel: (model: string) => Promise<{ success: boolean; message?: string }>
     getWhisperModelsDir: () => Promise<string>
     onWhisperSetupStatus: (callback: (data: WhisperSetupStatus) => void) => () => void
 
