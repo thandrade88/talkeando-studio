@@ -118,3 +118,4 @@ whisper_print_timings: total time = 456.78 ms
     expect(result[0].text).toBe('[música] Olá a todos')
   })
 })
+

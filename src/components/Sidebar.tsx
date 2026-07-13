@@ -11,6 +11,9 @@ const navItems = [
 export default function Sidebar() {
   const location = useLocation()
   const transcribingEpisodeId = useAppStore((s) => s.transcribingEpisodeId)
+  const txProgress = useAppStore((s) => s.txProgress)
+  const txStatus   = useAppStore((s) => s.txStatus)
+  const txEta      = useAppStore((s) => s.txEta)
 
   return (
     <aside className="w-48 flex flex-col bg-card border-r border-border shrink-0">
@@ -51,8 +54,21 @@ export default function Sidebar() {
         <div className="px-3 py-2.5 mx-2 mb-2 bg-blue-500/10 border border-blue-500/20 rounded-lg no-drag">
           <div className="flex items-center gap-2">
             <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400 shrink-0" />
-            <span className="text-xs text-blue-400">Transcrevendo...</span>
+            <span className="text-xs text-blue-400 truncate">
+              {txProgress > 0 ? `${txProgress}%` : 'Transcrevendo...'}
+            </span>
           </div>
+          {txProgress > 0 && (
+            <div className="mt-1.5">
+              <div className="h-1 bg-blue-500/20 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-blue-400 rounded-full transition-all duration-300"
+                  style={{ width: `${txProgress}%` }}
+                />
+              </div>
+              {txEta && <p className="text-[10px] text-blue-400/70 mt-1">{txEta}</p>}
+            </div>
+          )}
         </div>
       )}
 

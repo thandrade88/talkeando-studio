@@ -351,4 +351,12 @@ export function registerWhisperSetupHandlers(ipcMain: IpcMain): void {
   })
 
   ipcMain.handle('whisper:getModelsDir', () => getModelsDir())
+
+  ipcMain.handle('whisper:deleteModel', (_event, model: string) => {
+    if (!Object.keys(MODELS).includes(model)) throw new Error(`Modelo inválido: ${model}`)
+    const destPath = getModelPath(model)
+    if (!existsSync(destPath)) return { success: false, message: 'Arquivo não encontrado.' }
+    unlinkSync(destPath)
+    return { success: true }
+  })
 }

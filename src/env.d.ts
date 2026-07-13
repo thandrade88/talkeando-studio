@@ -76,6 +76,13 @@ interface Window {
     copyImageToClipboard: (filePath: string) => Promise<{ success: boolean }>
     downloadFile: (filePath: string, defaultName?: string) => Promise<string | null>
 
+    getMediaServerPort: () => Promise<number>
+
+    // OpusClip
+    isOpusClipConfigured: () => Promise<boolean>
+    sendToOpusClip: (clipId: number) => Promise<{ projectId: string; dashboardUrl: string }>
+    onOpusClipProgress: (cb: (msg: string, pct: number) => void) => () => void
+
     checkSetupComplete: () => Promise<boolean>
     shouldShowSetup: () => Promise<boolean>
     markSetupComplete: () => Promise<{ success: boolean }>
@@ -83,6 +90,7 @@ interface Window {
     getWhisperStatus: () => Promise<WhisperStatus>
     installWhisper: () => Promise<{ success: boolean; binaryPath?: string; message?: string }>
     downloadWhisperModel: (model: string) => Promise<{ success: boolean; modelPath?: string }>
+    deleteWhisperModel: (model: string) => Promise<{ success: boolean; message?: string }>
     getWhisperModelsDir: () => Promise<string>
     onWhisperSetupStatus: (callback: (data: WhisperSetupStatus) => void) => () => void
 
@@ -107,9 +115,27 @@ interface Window {
     onYouTubeAuthStarted: (cb: (url: string) => void) => () => void
 
     // WordPress
-    publishToWordPress: (opts: { episodeId: number; title: string; content: string; slug?: string; status?: 'draft' | 'publish' }) => Promise<{ postId: number; postUrl: string }>
-    updateWordPressPost: (opts: { postId: number; title: string; content: string; slug?: string }) => Promise<{ postId: number; postUrl: string }>
+    isWordPressConfigured: () => Promise<boolean>
+    testWordPressConnection: (opts?: { url: string; user: string; appPassword: string }) => Promise<{ connected: boolean; siteName: string; userName: string | null; postType: string }>
+    listWordPressPosts: (query?: string) => Promise<WordPressPost[]>
+    getWordPressPost: (postId: number) => Promise<WordPressPost>
+    linkWordPressPost: (episodeId: number, postId: number) => Promise<{ success: boolean }>
+    unlinkWordPressPost: (episodeId: number) => Promise<{ success: boolean }>
+    publishToWordPress: (opts: { episodeId: number; title: string; content: string; slug?: string; status?: 'draft' | 'publish'; featuredImageUrl?: string }) => Promise<{ postId: number; postUrl: string }>
+    updateWordPressPost: (opts: { postId: number; title?: string; content?: string; slug?: string; status?: 'draft' | 'publish' }) => Promise<WordPressPost>
+    deleteWordPressPost: (postId: number) => Promise<{ success: boolean }>
   }
+}
+
+interface WordPressPost {
+  postId: number
+  title: string
+  content: string
+  excerpt: string
+  modifiedAt: string
+  link: string
+  status: string
+  slug: string
 }
 
 interface YouTubeChannel {

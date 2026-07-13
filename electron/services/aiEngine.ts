@@ -496,13 +496,14 @@ TRECHO:
 ${transcript}`
 
     const raw = (await generateText(provider, prompt)).trim()
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim()
     let title = clip.title
-    let summary = raw
+    let summary = cleaned
     try {
-      const parsed = JSON.parse(raw)
+      const parsed = JSON.parse(cleaned)
       if (parsed.title) title = parsed.title
       if (parsed.summary) summary = parsed.summary
-    } catch { /* fallback: use raw as summary */ }
+    } catch { /* fallback: use cleaned text as summary */ }
     db.prepare('UPDATE clips SET title = ?, summary = ? WHERE id = ?').run(title, summary, clipId)
 
     win?.webContents.send('ai:progress', 'Resumo do clipe gerado!')

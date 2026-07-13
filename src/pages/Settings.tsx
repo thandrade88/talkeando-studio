@@ -11,12 +11,14 @@ import {
   Download,
   Loader2,
   CheckCircle2,
+  Trash2,
   Terminal,
   Sparkles,
   RotateCcw,
   Youtube,
   Link,
   Unlink,
+  Scissors,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
 
@@ -73,6 +75,7 @@ export default function Settings() {
   const [showApiKey, setShowApiKey] = useState(false)
   const [showOpenAIKey, setShowOpenAIKey] = useState(false)
   const [showGeminiKey, setShowGeminiKey] = useState(false)
+  const [showOpusKey, setShowOpusKey] = useState(false)
 
   const [whisperStatus, setWhisperStatus] = useState<WhisperStatus | null>(null)
   const [setupStatus, setSetupStatus] = useState<WhisperSetupStatus | null>(null)
@@ -96,6 +99,13 @@ export default function Settings() {
   const [ytMainAuthed, setYtMainAuthed]     = useState(false)
   const [ytCutsAuthed, setYtCutsAuthed]     = useState(false)
   const [ytConnectingCh, setYtConnectingCh] = useState<string | null>(null)
+
+  // WordPress connection
+  const [wpConnected, setWpConnected]       = useState(false)
+  const [wpTesting, setWpTesting]           = useState(false)
+  const [wpSiteName, setWpSiteName]         = useState<string | null>(null)
+  const [wpUserName, setWpUserName]         = useState<string | null>(null)
+  const [wpError, setWpError]               = useState<string | null>(null)
 
   const defaultPromptsRef = useRef<Record<string, string>>({})
 
@@ -134,6 +144,15 @@ export default function Settings() {
       }
     })
     window.api.getAllSettings().then(setSettings)
+    window.api.isWordPressConfigured().then(async configured => {
+      if (!configured) return
+      try {
+        const result = await window.api.testWordPressConnection()
+        setWpConnected(result.connected)
+        setWpSiteName(result.siteName)
+        setWpUserName(result.userName)
+      } catch { /* credentials saved but connection failed — user can retry */ }
+    })
     loadWhisperStatus()
     Promise.all([
       window.api.getDefaultResumePrompt(),
@@ -156,6 +175,47 @@ export default function Settings() {
 
   async function loadWhisperStatus() {
     setWhisperStatus(await window.api.getWhisperStatus())
+  }
+
+  async function connectWordPress() {
+    const url = settings.wordpress_url?.trim()
+    const user = settings.wordpress_user?.trim()
+    const appPassword = settings.wordpress_app_password?.trim()
+    if (!url || !user || !appPassword) {
+      setWpError('Preencha todos os campos.')
+      return
+    }
+    setWpTesting(true); setWpError(null)
+    try {
+      const result = await window.api.testWordPressConnection({ url, user, appPassword })
+      setWpConnected(result.connected)
+      setWpSiteName(result.siteName)
+      setWpUserName(result.userName)
+    } catch (err) {
+      setWpConnected(false)
+      setWpSiteName(null)
+      setWpUserName(null)
+      const msg = err instanceof Error ? err.message : String(err)
+      if (msg.includes('rest_not_logged_in') || msg.includes('rest_forbidden'))
+        setWpError('Autenticação falhou. Verifique se Application Passwords estão ativadas no WordPress e se o usuário/senha estão corretos.')
+      else if (msg.includes('401'))
+        setWpError('Credenciais inválidas. Verifique usuário e Application Password.')
+      else if (msg.includes('404') || msg.includes('ENOTFOUND'))
+        setWpError('URL não encontrada. Verifique o endereço do site.')
+      else if (msg.includes('fetch') || msg.includes('ECONNREFUSED'))
+        setWpError('Não foi possível conectar. Verifique a URL e se o site está online.')
+      else setWpError(msg)
+    } finally { setWpTesting(false) }
+  }
+
+  async function disconnectWordPress() {
+    await window.api.setSetting('wordpress_url', '')
+    await window.api.setSetting('wordpress_user', '')
+    await window.api.setSetting('wordpress_app_password', '')
+    setSettings(p => ({ ...p, wordpress_url: '', wordpress_user: '', wordpress_app_password: '' }))
+    setWpConnected(false)
+    setWpSiteName(null)
+    setWpUserName(null)
   }
 
   async function saveSetting(key: string, value: string) {
@@ -191,6 +251,15 @@ export default function Settings() {
       alert(`Erro ao baixar modelo: ${err}`)
     } finally {
       setDownloadingModel(null); setSetupStatus(null)
+    }
+  }
+
+  async function deleteModel(model: string) {
+    try {
+      await window.api.deleteWhisperModel(model)
+      await loadWhisperStatus()
+    } catch (err) {
+      alert(`Erro ao deletar modelo: ${err}`)
     }
   }
 
@@ -374,54 +443,84 @@ export default function Settings() {
             </section>
 
             {/* WordPress */}
-            <section className="bg-card border border-border rounded-xl p-5 space-y-3">
-              <h2 className="text-sm font-semibold flex items-center gap-2">
-                <Globe className="w-4 h-4 text-primary" />
-                WordPress
-              </h2>
-              <p className="text-xs text-muted-foreground">
-                URL do site e credenciais para publicar posts via REST API.
-                Crie uma <strong className="text-foreground">Application Password</strong> em
-                Usuários → Perfil → Senhas de aplicação.
-              </p>
-              <div className="flex gap-2">
-                <input
-                  type="url"
-                  value={settings.wordpress_url ?? ''}
-                  onChange={e => setSettings(p => ({ ...p, wordpress_url: e.target.value }))}
-                  placeholder="https://meusite.com"
-                  className="flex-1 bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary/40"
-                />
-                <SaveButton onClick={() => saveSetting('wordpress_url', settings.wordpress_url ?? '')} saved={saved.wordpress_url} />
+            <section className="bg-card border border-border rounded-xl p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold flex items-center gap-2">
+                  <Globe className="w-4 h-4 text-primary" />
+                  WordPress
+                </h2>
+                {wpConnected && (
+                  <span className="flex items-center gap-1.5 text-xs text-green-400">
+                    <CheckCircle2 className="w-3.5 h-3.5" />Conectado
+                  </span>
+                )}
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Usuário</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={settings.wordpress_user ?? ''}
-                      onChange={e => setSettings(p => ({ ...p, wordpress_user: e.target.value }))}
-                      placeholder="admin"
-                      className="flex-1 bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary/40"
-                    />
-                    <SaveButton onClick={() => saveSetting('wordpress_user', settings.wordpress_user ?? '')} saved={saved.wordpress_user} />
+
+              {wpConnected && wpSiteName ? (
+                <div className="flex items-center gap-3 bg-green-500/10 border border-green-500/20 rounded-lg px-4 py-3">
+                  <div className="w-8 h-8 rounded-full bg-green-500/20 flex items-center justify-center shrink-0">
+                    <Globe className="w-4 h-4 text-green-400" />
                   </div>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Application Password</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="password"
-                      value={settings.wordpress_app_password ?? ''}
-                      onChange={e => setSettings(p => ({ ...p, wordpress_app_password: e.target.value }))}
-                      placeholder="xxxx xxxx xxxx xxxx"
-                      className="flex-1 bg-secondary border border-border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-primary/40"
-                    />
-                    <SaveButton onClick={() => saveSetting('wordpress_app_password', settings.wordpress_app_password ?? '')} saved={saved.wordpress_app_password} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-foreground truncate">{wpSiteName}</p>
+                    {wpUserName && <p className="text-xs text-muted-foreground">Logado como {wpUserName}</p>}
                   </div>
+                  <button onClick={disconnectWordPress}
+                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-destructive">
+                    <Unlink className="w-3.5 h-3.5" />Desconectar
+                  </button>
                 </div>
-              </div>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    Conecte ao seu WordPress para publicar e gerenciar posts diretamente do Studio.
+                    Crie uma <strong className="text-foreground">Application Password</strong> em
+                    wp-admin → Usuários → Perfil → Senhas de aplicação.
+                  </p>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">URL do site</label>
+                    <input
+                      type="url"
+                      value={settings.wordpress_url ?? ''}
+                      onChange={e => setSettings(p => ({ ...p, wordpress_url: e.target.value }))}
+                      placeholder="https://meusite.com"
+                      className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary/40"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Usuário</label>
+                      <input
+                        type="text"
+                        value={settings.wordpress_user ?? ''}
+                        onChange={e => setSettings(p => ({ ...p, wordpress_user: e.target.value }))}
+                        placeholder="admin"
+                        className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary/40"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Application Password</label>
+                      <input
+                        type="password"
+                        value={settings.wordpress_app_password ?? ''}
+                        onChange={e => setSettings(p => ({ ...p, wordpress_app_password: e.target.value }))}
+                        placeholder="xxxx xxxx xxxx xxxx"
+                        className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-primary/40"
+                      />
+                    </div>
+                  </div>
+                  {wpError && (
+                    <div className="bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">
+                      <p className="text-xs text-destructive">{wpError}</p>
+                    </div>
+                  )}
+                  <button onClick={connectWordPress} disabled={wpTesting}
+                    className="flex items-center justify-center gap-2 w-full py-2.5 bg-primary hover:bg-primary/90 text-white text-sm font-medium rounded-lg disabled:opacity-50 transition-colors">
+                    {wpTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link className="w-4 h-4" />}
+                    {wpTesting ? 'Conectando...' : 'Conectar ao WordPress'}
+                  </button>
+                </>
+              )}
             </section>
 
             {/* YouTube */}
@@ -592,6 +691,30 @@ export default function Settings() {
               )}
             </section>
 
+            {/* OpusClip */}
+            <section className="bg-card border border-border rounded-xl p-5 space-y-4">
+              <h2 className="text-sm font-semibold flex items-center gap-2">
+                <Scissors className="w-4 h-4 text-primary" />
+                OpusClip
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                Envie clipes exportados diretamente ao OpusClip para gerar Shorts, Reels e TikToks com IA.
+                Obtenha sua API key em <strong className="text-foreground">clip.opus.pro/dashboard → Settings → API</strong>.
+              </p>
+              <ApiKeyField
+                label="OpusClip API Key"
+                active={!!(settings.opusclip_api_key)}
+                value={settings.opusclip_api_key ?? ''}
+                placeholder="op_live_..."
+                show={showOpusKey}
+                onToggleShow={() => setShowOpusKey(v => !v)}
+                onChange={v => setSettings(p => ({ ...p, opusclip_api_key: v }))}
+                onSave={() => saveSetting('opusclip_api_key', settings.opusclip_api_key ?? '')}
+                saved={saved.opusclip_api_key}
+                hint="clip.opus.pro/dashboard → Settings → API"
+              />
+            </section>
+
             {/* Output dir */}
             <section className="bg-card border border-border rounded-xl p-5 space-y-3">
               <h2 className="text-sm font-semibold flex items-center gap-2">
@@ -677,6 +800,7 @@ export default function Settings() {
                         setupStatus={setupStatus}
                         downloadingModel={downloadingModel}
                         onDownload={downloadModel}
+                        onDelete={deleteModel}
                         onModelChange={loadWhisperStatus}
                       />
                     </>
@@ -713,6 +837,7 @@ export default function Settings() {
                         setupStatus={setupStatus}
                         downloadingModel={downloadingModel}
                         onDownload={downloadModel}
+                        onDelete={deleteModel}
                         onModelChange={loadWhisperStatus}
                       />
                     </>
@@ -783,13 +908,14 @@ export default function Settings() {
 }
 
 function ModelsStep({
-  stepNumber, whisperStatus, setupStatus, downloadingModel, onDownload, onModelChange,
+  stepNumber, whisperStatus, setupStatus, downloadingModel, onDownload, onDelete, onModelChange,
 }: {
   stepNumber: number
   whisperStatus: WhisperStatus
   setupStatus: WhisperSetupStatus | null
   downloadingModel: string | null
   onDownload: (model: string) => void
+  onDelete: (model: string) => void
   onModelChange: () => void
 }) {
   return (
@@ -836,7 +962,17 @@ function ModelsStep({
                 )}
               </div>
               {m.downloaded ? (
-                <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />
+                <div className="flex items-center gap-2 shrink-0">
+                  <CheckCircle2 className="w-4 h-4 text-primary" />
+                  <button
+                    onClick={() => onDelete(m.key)}
+                    disabled={downloadingModel !== null}
+                    title="Deletar modelo"
+                    className="p-1 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive disabled:opacity-40 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               ) : (
                 <button onClick={() => onDownload(m.key)} disabled={isDownloading || isOtherDownloading}
                   className="flex items-center gap-1.5 text-xs bg-secondary hover:bg-secondary/70 border border-border px-2.5 py-1 rounded disabled:opacity-40 shrink-0">

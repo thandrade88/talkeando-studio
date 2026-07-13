@@ -28,6 +28,21 @@
     "nodejs-whisper": "^0.3.0",
     "openai": "^6.42.0"
   },
+  "build": {
+    "appId": "com.talkeando.studio",
+    "productName": "Talkeando Studio",
+    "files": [
+      "dist-electron/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg"
+    }
+  },
   "devDependencies": {
     "@electron-toolkit/preload": "^3.0.1",
     "@electron-toolkit/tsconfig": "^2.0.0",

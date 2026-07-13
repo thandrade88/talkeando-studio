@@ -34,6 +34,12 @@ export function formatRelativeDate(dateStr: string): string {
   return date.toLocaleDateString('pt-BR')
 }
 
+export function formatEta(s: number): string {
+  if (s < 10) return 'menos de 10s'
+  if (s < 60) return `~${Math.round(s)}s`
+  return `~${Math.ceil(s / 60)} min`
+}
+
 export function statusLabel(status: string): string {
   const labels: Record<string, string> = {
     imported: 'Importado',

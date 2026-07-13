@@ -94,6 +94,19 @@ const api = {
   downloadFile: (filePath: string, defaultName?: string) =>
     ipcRenderer.invoke('files:downloadFile', filePath, defaultName),
 
+  // Media server
+  getMediaServerPort: () => ipcRenderer.invoke('media:serverPort') as Promise<number>,
+
+  // OpusClip
+  isOpusClipConfigured: () => ipcRenderer.invoke('opusclip:isConfigured') as Promise<boolean>,
+  sendToOpusClip: (clipId: number) =>
+    ipcRenderer.invoke('opusclip:sendClip', clipId) as Promise<{ projectId: string; dashboardUrl: string }>,
+  onOpusClipProgress: (cb: (msg: string, pct: number) => void) => {
+    const handler = (_: unknown, msg: string, pct: number) => cb(msg, pct)
+    ipcRenderer.on('opusclip:progress', handler)
+    return () => ipcRenderer.removeListener('opusclip:progress', handler)
+  },
+
   // First run
   checkSetupComplete: () => ipcRenderer.invoke('setup:isComplete'),
   shouldShowSetup: () => ipcRenderer.invoke('setup:shouldShow'),
@@ -103,6 +116,7 @@ const api = {
   getWhisperStatus: () => ipcRenderer.invoke('whisper:getStatus'),
   installWhisper: () => ipcRenderer.invoke('whisper:install'),
   downloadWhisperModel: (model: string) => ipcRenderer.invoke('whisper:downloadModel', model),
+  deleteWhisperModel: (model: string) => ipcRenderer.invoke('whisper:deleteModel', model),
   getWhisperModelsDir: () => ipcRenderer.invoke('whisper:getModelsDir'),
   onWhisperSetupStatus: (callback: (data: WhisperSetupStatus) => void) => {
     const handler = (_: unknown, data: WhisperSetupStatus) => callback(data)
@@ -150,13 +164,27 @@ const api = {
   },
 
   // WordPress
+  isWordPressConfigured: () => ipcRenderer.invoke('wordpress:isConfigured') as Promise<boolean>,
+  testWordPressConnection: (opts?: { url: string; user: string; appPassword: string }) =>
+    ipcRenderer.invoke('wordpress:testConnection', opts),
+  listWordPressPosts: (query?: string) =>
+    ipcRenderer.invoke('wordpress:listPosts', query),
+  getWordPressPost: (postId: number) =>
+    ipcRenderer.invoke('wordpress:getPost', postId),
+  linkWordPressPost: (episodeId: number, postId: number) =>
+    ipcRenderer.invoke('wordpress:linkPost', episodeId, postId),
+  unlinkWordPressPost: (episodeId: number) =>
+    ipcRenderer.invoke('wordpress:unlinkPost', episodeId),
   publishToWordPress: (opts: {
     episodeId: number; title: string; content: string;
     slug?: string; status?: 'draft' | 'publish'
   }) => ipcRenderer.invoke('wordpress:publish', opts),
   updateWordPressPost: (opts: {
-    postId: number; title: string; content: string; slug?: string
+    postId: number; title?: string; content?: string;
+    slug?: string; status?: 'draft' | 'publish'
   }) => ipcRenderer.invoke('wordpress:update', opts),
+  deleteWordPressPost: (postId: number) =>
+    ipcRenderer.invoke('wordpress:delete', postId),
 }
 
 if (process.contextIsolated) {
