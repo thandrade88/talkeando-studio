@@ -63,16 +63,16 @@ const WHISPER_STDERR = 'progress = 50%\nprogress = 100%'
 
 const DEFAULT_EPISODE = { id: 1, file_path: '/ep.mp4', title: 'Episode 1', audio_path: '/audio.mp3' }
 
-/** Set up the 4 sequential .get() calls the handler makes in the success path.
+/** Set up the 2 sequential .get() calls the handler makes in the success path
+ *  (whisper_model/default_language are fetched together via a single .all() call,
+ *  which defaults to [] → 'base'/'pt' unless overridden per-test).
  *  NOTE: mockReset() is called first to clear any leftover queue from previous tests,
  *  since vi.clearAllMocks() does NOT drain the mockReturnValueOnce stack. */
 function setupDbGetSequence(episode = DEFAULT_EPISODE as unknown) {
   mockStmt.get.mockReset()
   mockStmt.get
     .mockReturnValueOnce(episode)    // call 1: episode lookup
-    .mockReturnValueOnce(undefined)  // call 2: whisper_model setting → defaults to 'base'
-    .mockReturnValueOnce(undefined)  // call 3: default_language setting → defaults to 'pt'
-    .mockReturnValueOnce({ id: 1 }) // call 4: stillExists check after whisper
+    .mockReturnValueOnce({ id: 1 }) // call 2: stillExists check after whisper
 }
 
 // ── tests ──────────────────────────────────────────────────────────────────────
