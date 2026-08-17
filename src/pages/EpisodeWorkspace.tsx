@@ -1991,6 +1991,13 @@ export default function EpisodeWorkspace() {
                             if (episodeId) {
                               await window.api.setSetting(`episode_${episodeId}_youtube_id`, v.videoId)
                               setYtSaved(true); setTimeout(() => setYtSaved(false), 2000)
+                              // Adopt the YouTube video's title and thumbnail as the episode's own —
+                              // the video is usually the canonical, publish-ready version of the name.
+                              const thumbnailUrl = `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`
+                              const updated = await window.api.updateEpisode(episodeId, {
+                                title: v.title, thumbnail_url: thumbnailUrl,
+                              })
+                              updateEpisode(updated)
                             }
                           }}
                           className={cn(

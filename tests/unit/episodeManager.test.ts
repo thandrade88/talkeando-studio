@@ -102,18 +102,21 @@ describe('allowed file extensions', () => {
 })
 
 describe('episodes:update field allowlist', () => {
-  it('only allows title and status fields', () => {
-    const allowed = ['title', 'status']
-    const input = { title: 'New Title', status: 'transcribed', file_path: '/evil', id: 999 }
+  it('only allows title, status and thumbnail_url fields', () => {
+    const allowed = ['title', 'status', 'thumbnail_url']
+    const input = {
+      title: 'New Title', status: 'transcribed', thumbnail_url: 'https://i.ytimg.com/vi/abc/hqdefault.jpg',
+      file_path: '/evil', id: 999,
+    }
     const fields = Object.keys(input).filter((k) => allowed.includes(k))
 
-    expect(fields).toEqual(['title', 'status'])
+    expect(fields).toEqual(['title', 'status', 'thumbnail_url'])
     expect(fields).not.toContain('file_path')
     expect(fields).not.toContain('id')
   })
 
   it('returns no fields when only non-allowed keys are provided', () => {
-    const allowed = ['title', 'status']
+    const allowed = ['title', 'status', 'thumbnail_url']
     const input = { file_path: '/evil', arbitrary: 'data' }
     const fields = Object.keys(input).filter((k) => allowed.includes(k))
 

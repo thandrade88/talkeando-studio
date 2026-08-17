@@ -128,7 +128,7 @@ export function registerEpisodeHandlers(ipcMain: IpcMain): void {
 
   ipcMain.handle('episodes:update', (_event, id: number, data: Record<string, unknown>) => {
     const db = getDatabase()
-    const allowed = ['title', 'status']
+    const allowed = ['title', 'status', 'thumbnail_url']
     const fields = Object.keys(data).filter(k => allowed.includes(k))
     if (fields.length === 0) throw new Error('No valid fields to update')
 
