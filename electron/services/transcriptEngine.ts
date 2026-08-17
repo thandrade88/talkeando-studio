@@ -58,7 +58,7 @@ const NON_SPEECH_RE = /^\s*[\[(][\w\sÀ-ɏ]+[\])]\s*$/i
 export function parseWhisperOutput(output: string): { start_time: number; end_time: number; text: string }[] {
   const segments: { start_time: number; end_time: number; text: string }[] = []
   const pattern = /\[(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3})\]\s+(.+)/g
-  let match
+  let match: RegExpExecArray | null
   while ((match = pattern.exec(output)) !== null) {
     const text = match[3].trim()
     if (!NON_SPEECH_RE.test(text)) {
@@ -108,21 +108,27 @@ function runWhisper(
   processors: number, onProgress: (pct: number, msg: string) => void,
 ): Promise<Segment[]> {
   return new Promise((resolve, reject) => {
-    let stdoutBuf = ''
-    let stderrBuf = ''
+    const stdoutChunks: string[] = []
+    const stderrChunks: string[] = []
+    let stderrCarry = ''
     onProgress(1, `Transcrevendo com ${processors} processador${processors > 1 ? 'es' : ''} (${THREADS_PER_WORKER} threads/cada)...`)
     const proc = spawn(whisperBin, [
       '-m', modelPath, '-f', audioPath, '-l', language, '-pp',
       '-t', String(THREADS_PER_WORKER),
       '-p', String(processors),
     ])
-    proc.stdout.on('data', (d: Buffer) => { stdoutBuf += d.toString() })
+    proc.stdout.on('data', (d: Buffer) => { stdoutChunks.push(d.toString()) })
     proc.stderr.on('data', (d: Buffer) => {
-      stderrBuf += d.toString()
-      const m = d.toString().match(/progress\s*=\s*(\d+)%/)
+      const chunk = d.toString()
+      stderrChunks.push(chunk)
+      // "progress = NN%" can straddle two `data` events, so match against the
+      // previous chunk's tail plus this one rather than the chunk in isolation.
+      const m = (stderrCarry + chunk).match(/progress\s*=\s*(\d+)%/)
       if (m) onProgress(Math.max(1, parseInt(m[1], 10)), `Transcrevendo... ${m[1]}%`)
+      stderrCarry = chunk.slice(-32)
     })
     proc.on('close', (code) => {
+      const stderrBuf = stderrChunks.join('')
       if (code !== 0) {
         const isModelErr = stderrBuf.includes('bad magic') || stderrBuf.includes('invalid model')
         const hint = isModelErr
@@ -131,6 +137,7 @@ function runWhisper(
         reject(new Error(`Whisper encerrou com código ${code}.${hint}\nStderr: ${stderrBuf.slice(-400)}`))
         return
       }
+      const stdoutBuf = stdoutChunks.join('')
       const segments = parseWhisperOutput(stdoutBuf)
       if (segments.length === 0) {
         reject(new Error(
@@ -208,8 +215,12 @@ export function registerTranscriptHandlers(ipcMain: IpcMain): void {
       throw new Error('Whisper não instalado. Vá em Configurações → Setup Whisper para instalar.')
     }
 
-    const modelSetting = db.prepare("SELECT value FROM settings WHERE key = 'whisper_model'").get() as { value: string } | undefined
-    const model = modelSetting?.value ?? 'base'
+    const settingRows = db.prepare(
+      "SELECT key, value FROM settings WHERE key IN ('whisper_model', 'default_language')",
+    ).all() as { key: string; value: string }[]
+    const settings = new Map(settingRows.map(r => [r.key, r.value]))
+
+    const model = settings.get('whisper_model') ?? 'base'
     const modelPath = getModelPath(model)
 
     if (!existsSync(modelPath)) {
@@ -226,8 +237,7 @@ export function registerTranscriptHandlers(ipcMain: IpcMain): void {
       )
     }
 
-    const langSetting = db.prepare("SELECT value FROM settings WHERE key = 'default_language'").get() as { value: string } | undefined
-    const language = langSetting?.value ?? 'pt'
+    const language = settings.get('default_language') ?? 'pt'
 
     db.prepare('UPDATE episodes SET status = ? WHERE id = ?').run('transcribing', episodeId)
     sendProgress(win, 1, 'Iniciando transcrição...')
@@ -273,7 +283,7 @@ export function registerTranscriptHandlers(ipcMain: IpcMain): void {
         (pct, msg) => sendProgress(win, pct, msg),
       )
 
-      if (tempWav) try { unlinkSync(tempWav) } catch {}
+      if (tempWav) try { unlinkSync(tempWav) } catch (err) { console.warn(`Falha ao remover WAV temporário ${tempWav}:`, err) }
 
       // Timestamps from whisper are relative to the cut start; shift back to episode time.
       if (startSeconds > 0) {
@@ -297,7 +307,7 @@ export function registerTranscriptHandlers(ipcMain: IpcMain): void {
       sendProgress(win, 100, `Transcrição concluída! ${segments.length} segmentos.`)
       return { success: true, segmentCount: segments.length }
     } catch (err) {
-      if (tempWav) try { unlinkSync(tempWav) } catch {}
+      if (tempWav) try { unlinkSync(tempWav) } catch (cleanupErr) { console.warn(`Falha ao remover WAV temporário ${tempWav}:`, cleanupErr) }
       db.prepare('UPDATE episodes SET status = ? WHERE id = ?').run('imported', episodeId)
       throw err
     }
