@@ -156,6 +156,7 @@ interface Episode {
   title: string
   file_path: string
   audio_path: string
+  thumbnail_url: string
   duration: number
   status: 'imported' | 'transcribing' | 'transcribed' | 'ready'
   created_at: string
