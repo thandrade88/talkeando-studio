@@ -116,6 +116,11 @@ function runWhisper(
       '-m', modelPath, '-f', audioPath, '-l', language, '-pp',
       '-t', String(THREADS_PER_WORKER),
       '-p', String(processors),
+      // Disable carrying the previous segment's decoded text as context for the next
+      // one. Without this, a single early misfire (e.g. intro music mislabeled as
+      // "[música]") poisons the context window and whisper keeps repeating that
+      // label for the rest of the file, even over audio with clear real speech.
+      '-mc', '0',
     ])
     proc.stdout.on('data', (d: Buffer) => { stdoutChunks.push(d.toString()) })
     proc.stderr.on('data', (d: Buffer) => {
@@ -131,9 +136,15 @@ function runWhisper(
       const stderrBuf = stderrChunks.join('')
       if (code !== 0) {
         const isModelErr = stderrBuf.includes('bad magic') || stderrBuf.includes('invalid model')
+        // Windows NTSTATUS crash codes (e.g. 0xC000001D ILLEGAL_INSTRUCTION) surface as huge
+        // positive exit codes. Most common cause: a prebuilt OpenBLAS DLL using CPU
+        // instructions (AVX-512, etc.) the machine doesn't support.
+        const isCrash = code > 0xff
         const hint = isModelErr
           ? ' Modelo corrompido — vá em Configurações → Whisper, delete e baixe novamente.'
-          : ''
+          : isCrash
+            ? ' O binário do Whisper travou (possível incompatibilidade de CPU com a build BLAS instalada). Feche o app, apague a pasta "whisper-bin" em %APPDATA%/talkeando-studio e reabra para reinstalar.'
+            : ''
         reject(new Error(`Whisper encerrou com código ${code}.${hint}\nStderr: ${stderrBuf.slice(-400)}`))
         return
       }

@@ -13,6 +13,7 @@ const mockApi = {
   isWordPressConfigured: vi.fn(),
   testWordPressConnection: vi.fn(),
   getTranscript: vi.fn(),
+  getMediaServerPort: vi.fn(),
 }
 
 // Assign to window.api before importing the component so the module captures it
@@ -80,6 +81,7 @@ describe('EpisodeWorkspace — connecting a YouTube video', () => {
     mockApi.setSetting.mockResolvedValue({ success: true })
     mockApi.isWordPressConfigured.mockResolvedValue(false)
     mockApi.getTranscript.mockResolvedValue([])
+    mockApi.getMediaServerPort.mockResolvedValue(0)
     mockApi.updateEpisode.mockImplementation((id: number, data: Partial<Episode>) =>
       Promise.resolve({ ...storeState.episodes[0], ...data })
     )
