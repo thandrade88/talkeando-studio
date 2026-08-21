@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
+import { app } from 'electron'
 
 vi.mock('electron')
 vi.mock('better-sqlite3')
@@ -94,5 +95,40 @@ describe('MODELS constant', () => {
       tiny: {}, base: {}, small: {}, medium: {}, 'large-v3-turbo': {}, 'large-v3': {}
     }
     expect(Object.keys(MODELS)).not.toContain('large')
+  })
+})
+
+describe('Windows binary selection', () => {
+  it('prefers whisper-cli.exe over main.exe regardless of traversal order', async () => {
+    const originalPlatform = process.platform
+    const userDataDir = '/tmp/talkeando-test'
+    const binDir = `${userDataDir}/whisper-bin`
+
+    try {
+      Object.defineProperty(process, 'platform', { value: 'win32' })
+      vi.resetModules()
+
+      vi.doMock('fs', async () => {
+        const actual = await vi.importActual<typeof import('fs')>('fs')
+        return {
+          ...actual,
+          existsSync: vi.fn((targetPath: string) => targetPath === binDir),
+          readdirSync: vi.fn(() => [
+            { name: 'main.exe', isDirectory: () => false },
+            { name: 'whisper-cli.exe', isDirectory: () => false },
+          ]),
+        }
+      })
+
+      vi.mocked(app.getPath).mockReturnValue(userDataDir)
+
+      const { getWhisperBinaryPath } = await import('../../electron/services/whisperSetup')
+
+      expect(getWhisperBinaryPath()).toBe(`${binDir}/whisper-cli.exe`)
+    } finally {
+      vi.doUnmock('fs')
+      vi.resetModules()
+      Object.defineProperty(process, 'platform', { value: originalPlatform })
+    }
   })
 })
