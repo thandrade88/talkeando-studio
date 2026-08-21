@@ -149,6 +149,12 @@ describe('transcripts:start IPC handler', () => {
     expect(result).toEqual({ success: true, segmentCount: 2 })
   })
 
+  it('invokes whisper with "-mc 0" to disable context carry-over', async () => {
+    await handlers['transcripts:start'](mockEvent, 1)
+    const whisperArgs = vi.mocked(spawn).mock.calls[0][1] as string[]
+    expect(whisperArgs).toEqual(expect.arrayContaining(['-mc', '0']))
+  })
+
   it('saves exactly one DB row per parsed segment', async () => {
     await handlers['transcripts:start'](mockEvent, 1)
     // INSERT calls have 4 args: (episodeId, start_time, end_time, text)

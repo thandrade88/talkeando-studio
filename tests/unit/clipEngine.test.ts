@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { join, sep } from 'path'
 
 vi.mock('electron')
 vi.mock('better-sqlite3')
@@ -169,9 +170,11 @@ describe('clips:export', () => {
     const result = await resultPromise as { success: boolean; filePath: string }
 
     expect(result.success).toBe(true)
-    expect(result.filePath).toContain('/tmp/documents/Talkeando Studio/episodes/episodio-n-1-o-inicio/')
+    expect(result.filePath).toContain(
+      join('/tmp/documents', 'Talkeando Studio', 'episodes', 'episodio-n-1-o-inicio') + sep
+    )
     expect(mkdirSync).toHaveBeenCalledWith(
-      '/tmp/documents/Talkeando Studio/episodes/episodio-n-1-o-inicio',
+      join('/tmp/documents', 'Talkeando Studio', 'episodes', 'episodio-n-1-o-inicio'),
       { recursive: true }
     )
   })
@@ -195,7 +198,7 @@ describe('clips:export', () => {
     proc.emit('close', 0)
     const result = await resultPromise as { success: boolean; filePath: string }
 
-    expect(result.filePath).toContain('/custom/base/episodes/meu-episodio/')
+    expect(result.filePath).toContain(join('/custom/base', 'episodes', 'meu-episodio') + sep)
   })
 })
 
@@ -261,7 +264,8 @@ describe('clips:setThumbnailFromFrame', () => {
     registerClipHandlers(ipcMain as never)
 
     const clip = { title: 'Melhor Momento', episode_title: 'Meu Episódio' }
-    const updatedClip = { id: 9, thumbnail_path: '/tmp/documents/Talkeando Studio/episodes/meu-episodio/Melhor_Momento_thumb.jpg' }
+    const expectedThumbPath = join('/tmp/documents', 'Talkeando Studio', 'episodes', 'meu-episodio', 'Melhor_Momento_thumb.jpg')
+    const updatedClip = { id: 9, thumbnail_path: expectedThumbPath }
     getDbInstance().prepare.mockImplementation((sql: string) => {
       if (sql.includes('JOIN episodes')) return { get: vi.fn().mockReturnValue(clip) }
       if (sql.includes('output_directory')) return { get: vi.fn().mockReturnValue(undefined) }
@@ -272,7 +276,7 @@ describe('clips:setThumbnailFromFrame', () => {
     const result = await handlers['clips:setThumbnailFromFrame']({}, 9, 'data:image/jpeg;base64,QQ==')
 
     expect(writeFileSync).toHaveBeenCalledWith(
-      '/tmp/documents/Talkeando Studio/episodes/meu-episodio/Melhor_Momento_thumb.jpg',
+      expectedThumbPath,
       expect.any(Buffer)
     )
     expect(result).toEqual(updatedClip)

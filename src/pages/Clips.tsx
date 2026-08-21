@@ -25,6 +25,14 @@ export default function Clips() {
   const episode = episodes.find((e) => e.id === episodeId)
   const selectedClip = clips.find((c) => c.id === selectedClipId)
 
+  // Local HTTP media server port — app-media:// fails to parse as a valid URL for
+  // Windows paths (drive letter + backslashes + spaces), so playback goes through
+  // this HTTP server instead.
+  const [mediaPort, setMediaPort] = useState(0)
+  useEffect(() => { window.api.getMediaServerPort().then(setMediaPort) }, [])
+  const toMediaUrl = (fp: string) =>
+    mediaPort ? `http://127.0.0.1:${mediaPort}/?p=${encodeURIComponent(fp)}` : ''
+
   useEffect(() => {
     if (!episodeId) return
     selectEpisode(episodeId)
@@ -32,12 +40,12 @@ export default function Clips() {
   }, [episodeId])
 
   useEffect(() => {
-    if (!episode?.file_path) return
-    const audio = new Audio(`app-media://${episode.file_path}`)
+    if (!episode?.file_path || !mediaPort) return
+    const audio = new Audio(toMediaUrl(episode.file_path))
     audioRef.current = audio
     audio.ontimeupdate = () => setCurrentTime(audio.currentTime)
     return () => { audio.pause(); audio.src = '' }
-  }, [episode?.file_path])
+  }, [episode?.file_path, mediaPort])
 
   useEffect(() => {
     const unsub = window.api.onClipProgress((prog) => setExportProgress(prog))
@@ -216,7 +224,7 @@ export default function Clips() {
                 <div className="aspect-video bg-black rounded-xl border border-border flex items-center justify-center">
                   {episode.file_path.match(/\.(mp4|mov|avi|mkv|webm)$/i) ? (
                     <video
-                      src={`app-media://${episode.file_path}#t=${selectedClip.start_time},${selectedClip.end_time}`}
+                      src={`${toMediaUrl(episode.file_path)}#t=${selectedClip.start_time},${selectedClip.end_time}`}
                       controls
                       className="w-full h-full rounded-xl"
                     />
@@ -225,7 +233,7 @@ export default function Clips() {
                       <Scissors className="w-12 h-12 mx-auto mb-2 opacity-40" />
                       <p className="text-sm">Arquivo de áudio</p>
                       <audio
-                        src={`app-media://${episode.file_path}`}
+                        src={toMediaUrl(episode.file_path)}
                         controls
                         className="mt-3 w-full"
                       />

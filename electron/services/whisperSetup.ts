@@ -27,21 +27,30 @@ function getWindowsBinDir(): string {
   return join(app.getPath('userData'), 'whisper-bin')
 }
 
+// `names` is a priority list (best match first) — e.g. whisper.cpp releases ship both
+// `whisper-cli.exe` (the real tool) and a `main.exe` deprecation stub that just prints a
+// warning and exits 1. Directory traversal order is not alphabetical/priority order, so
+// we must collect all matches first and then pick by priority rather than return on the
+// first hit encountered while walking.
 function findInDir(dir: string, names: string[]): string {
   if (!existsSync(dir)) return ''
-  const walk = (d: string): string => {
+  const found: Record<string, string> = {}
+  const walk = (d: string): void => {
     for (const entry of readdirSync(d, { withFileTypes: true })) {
       const full = join(d, entry.name)
       if (entry.isDirectory()) {
-        const found = walk(full)
-        if (found) return found
-      } else if (names.includes(entry.name.toLowerCase())) {
-        return full
+        walk(full)
+      } else {
+        const lower = entry.name.toLowerCase()
+        if (names.includes(lower) && !(lower in found)) found[lower] = full
       }
     }
-    return ''
   }
-  return walk(dir)
+  walk(dir)
+  for (const name of names) {
+    if (found[name]) return found[name]
+  }
+  return ''
 }
 
 // ── Mac/Linux helpers ──────────────────────────────────────────────────────────
@@ -192,9 +201,14 @@ async function installWhisperWindows(
 
   const release = await fetchLatestRelease()
 
-  // Prefer OpenBLAS build (fastest on CPU), fall back to any x64 Windows zip
+  // Prefer the plain CPU build: it ships per-microarchitecture backends
+  // (ggml-cpu-haswell.dll, -sandybridge.dll, etc.) and picks the right one
+  // at runtime. The OpenBLAS build bundles a single libopenblas.dll built for
+  // a specific instruction set (e.g. AVX-512) and crashes with "Illegal
+  // instruction" (STATUS_ILLEGAL_INSTRUCTION) on older/other CPUs that don't
+  // support it — seen on an Intel Haswell (i5-4670K) machine.
   const asset =
-    release.assets.find(a => /whisper-blas-bin-x64\.zip$/i.test(a.name)) ??
+    release.assets.find(a => /^whisper-bin-x64\.zip$/i.test(a.name)) ??
     release.assets.find(a => /whisper.*x64.*\.zip$/i.test(a.name)) ??
     release.assets.find(a => /whisper.*win.*\.zip$/i.test(a.name))
 

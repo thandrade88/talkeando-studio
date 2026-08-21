@@ -74,6 +74,12 @@ function TranscriptionTab({
   const transcribingEpisodeId  = useAppStore(s => s.transcribingEpisodeId)
   const setTranscribingEpisode = useAppStore(s => s.setTranscribingEpisode)
 
+  // Local HTTP media server port — app-media:// fails to parse as a valid URL for
+  // Windows paths (drive letter + backslashes + spaces), so audio playback goes
+  // through the same HTTP server ClipsTab uses for video preview instead.
+  const [mediaPort, setMediaPort] = useState(0)
+  useEffect(() => { window.api.getMediaServerPort().then(setMediaPort) }, [])
+
   const [segments, setSegments]             = useState<TranscriptSegment[]>([])
   const [editingId, setEditingId]           = useState<number | null>(null)
   const [editText, setEditText]             = useState('')
@@ -120,7 +126,9 @@ function TranscriptionTab({
     setEditingId(null)
   }
 
-  const audioSrc = episode.audio_path ? `app-media://${episode.audio_path}` : null
+  const audioSrc = episode.audio_path && mediaPort
+    ? `http://127.0.0.1:${mediaPort}/?p=${encodeURIComponent(episode.audio_path)}`
+    : null
 
   return (
     <div className="flex flex-col flex-1 overflow-y-auto">
@@ -625,9 +633,16 @@ function ContentTab({ episodeId }: { episodeId: number }) {
       } catch {
         content = activeContent.content
       }
-      if (wpPostId) {
+      // Re-read the linked post id fresh instead of trusting local state: the workspace's
+      // WordPress toolbar (a separate component with its own copy of this value) can link
+      // a post without this tab remounting, which would otherwise leave wpPostId stale here
+      // and cause a duplicate post to be created instead of updating the linked one.
+      const savedWpPostId = await window.api.getSetting(`episode_${episodeId}_wp_post_id`)
+      const currentWpPostId = savedWpPostId ? Number(savedWpPostId) : null
+      if (currentWpPostId !== wpPostId) setWpPostId(currentWpPostId)
+      if (currentWpPostId) {
         // Update: only sync content — never overwrite title or slug
-        const r = await window.api.updateWordPressPost({ postId: wpPostId, content })
+        const r = await window.api.updateWordPressPost({ postId: currentWpPostId, content })
         setWpResult(r.link)
         setWpSuccess('Conteúdo atualizado!')
         setTimeout(() => setWpSuccess(null), 3000)
@@ -1530,7 +1545,7 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
                     <div className="aspect-video bg-black rounded-xl border border-border flex items-center justify-center">
                       <div className="text-center text-muted-foreground p-6 w-full">
                         <Scissors className="w-12 h-12 mx-auto mb-2 opacity-30" />
-                        <audio src={`app-media://${episode.file_path}`} controls className="w-full mt-3" />
+                        <audio src={toMediaUrl(episode.file_path)} controls className="w-full mt-3" />
                       </div>
                     </div>
                   )}
@@ -1685,7 +1700,7 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
                     {selected.thumbnail_path ? (
                       <>
                         <img
-                          src={`app-media://${selected.thumbnail_path}?t=${selected.thumbnail_path}`}
+                          src={`${toMediaUrl(selected.thumbnail_path)}&t=${encodeURIComponent(selected.thumbnail_path)}`}
                           alt="Thumbnail"
                           className="w-full aspect-video object-cover rounded-lg border border-border"
                         />
