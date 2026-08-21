@@ -10,6 +10,22 @@ const mockApi = {
   getSetting: vi.fn(),
   setSetting: vi.fn(),
   updateEpisode: vi.fn(),
+  getGeneratedContent: vi.fn(),
+  getKeyMoments: vi.fn(),
+  getDefaultResumePrompt: vi.fn(),
+  getDefaultBlogPrompt: vi.fn(),
+  getDefaultYoutubePrompt: vi.fn(),
+  getDefaultInstagramPrompt: vi.fn(),
+  onAIProgress: vi.fn(),
+  saveContent: vi.fn(),
+  generateContent: vi.fn(),
+  generateResume: vi.fn(),
+  updateWordPressPost: vi.fn(),
+  publishToWordPress: vi.fn(),
+  listWordPressPosts: vi.fn(),
+  getWordPressPost: vi.fn(),
+  linkWordPressPost: vi.fn(),
+  unlinkWordPressPost: vi.fn(),
   isWordPressConfigured: vi.fn(),
   testWordPressConnection: vi.fn(),
   getTranscript: vi.fn(),
@@ -137,5 +153,75 @@ describe('EpisodeWorkspace — connecting a YouTube video', () => {
     expect(document.querySelector('audio')?.getAttribute('src')).toBe(
       `http://127.0.0.1:5173/?p=${encodeURIComponent(windowsAudioPath)}`
     )
+  })
+})
+
+describe('EpisodeWorkspace — WordPress publishing from Content tab', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    storeState.episodes = [makeEpisode({ status: 'transcribed' })]
+
+    let linkedPostId = ''
+    mockApi.linkWordPressPost.mockImplementation(async (_episodeId: number, postId: number) => {
+      linkedPostId = String(postId)
+    })
+
+    mockApi.getSetting.mockImplementation(async (key: string) => {
+      if (key === 'episode_1_wp_post_id') return linkedPostId
+      if (key === 'episode_1_youtube_id') return ''
+      if (key === 'ai_provider') return 'claude'
+      if (key === 'blog_post_prompt' || key === 'youtube_prompt' || key === 'instagram_prompt') return ''
+      return null
+    })
+
+    mockApi.getGeneratedContent.mockResolvedValue([
+      {
+        id: 11,
+        episode_id: 1,
+        type: 'blog_post',
+        content: JSON.stringify({ title: 'Título', slug: 'slug', htmlContent: '<p>Conteúdo atualizado</p>' }),
+        metadata: '{}',
+        created_at: new Date().toISOString(),
+      },
+    ])
+    mockApi.getDefaultBlogPrompt.mockResolvedValue('')
+    mockApi.getDefaultYoutubePrompt.mockResolvedValue('')
+    mockApi.getDefaultInstagramPrompt.mockResolvedValue('')
+    mockApi.getDefaultResumePrompt.mockResolvedValue('')
+    mockApi.getKeyMoments.mockResolvedValue([])
+    mockApi.onAIProgress.mockImplementation(() => {})
+    mockApi.getYouTubeStatus.mockResolvedValue({ connected: false, mainChannelId: null })
+    mockApi.listRecentVideos.mockResolvedValue([])
+    mockApi.isWordPressConfigured.mockResolvedValue(true)
+    mockApi.testWordPressConnection.mockResolvedValue({ success: true })
+    mockApi.listWordPressPosts.mockResolvedValue([
+      { postId: 123, title: 'Post existente', content: '', excerpt: '', modifiedAt: new Date().toISOString(), link: 'https://wp.local/p/123', status: 'draft', slug: 'post-existente' },
+    ])
+    mockApi.getWordPressPost.mockResolvedValue({ postId: 123, title: 'Post existente', content: '', excerpt: '', modifiedAt: new Date().toISOString(), link: 'https://wp.local/p/123', status: 'draft', slug: 'post-existente' })
+    mockApi.updateWordPressPost.mockResolvedValue({ link: 'https://wp.local/p/123' })
+    mockApi.publishToWordPress.mockResolvedValue({ postId: 999, postUrl: 'https://wp.local/p/999' })
+    mockApi.setSetting.mockResolvedValue({ success: true })
+    mockApi.getTranscript.mockResolvedValue([])
+    mockApi.getMediaServerPort.mockResolvedValue(0)
+  })
+
+  it('updates the linked post instead of creating a new one after linking in the workspace toolbar', async () => {
+    const user = userEvent.setup()
+    renderWorkspace()
+
+    await user.click(await screen.findByPlaceholderText('Buscar post no WordPress…'))
+    await user.click(await screen.findByText('Post existente'))
+    expect(mockApi.linkWordPressPost).toHaveBeenCalledWith(1, 123)
+
+    await user.click(await screen.findByRole('button', { name: 'Blog Post' }))
+    await user.click(await screen.findByRole('button', { name: /WordPress/i }))
+
+    await waitFor(() => {
+      expect(mockApi.updateWordPressPost).toHaveBeenCalledWith({
+        postId: 123,
+        content: '<p>Conteúdo atualizado</p>',
+      })
+    })
+    expect(mockApi.publishToWordPress).not.toHaveBeenCalled()
   })
 })
