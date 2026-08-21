@@ -61,6 +61,7 @@ import EpisodeWorkspace from '../../src/pages/EpisodeWorkspace'
 function makeEpisode(overrides: Partial<Episode> = {}): Episode {
   return {
     id: 1,
+    podcast_id: 1,
     title: 'Título original do arquivo',
     file_path: '/tmp/ep.mp3',
     audio_path: '/tmp/ep.mp3',
@@ -218,6 +219,7 @@ describe('EpisodeWorkspace — WordPress publishing from Content tab', () => {
 
     await waitFor(() => {
       expect(mockApi.updateWordPressPost).toHaveBeenCalledWith({
+        episodeId: 1,
         postId: 123,
         content: '<p>Conteúdo atualizado</p>',
       })

@@ -1,18 +1,6 @@
 import { IpcMain } from 'electron'
 import { getDatabase } from './database'
-
-function getSetting(key: string): string | null {
-  try {
-    const row = getDatabase().prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined
-    return row?.value ?? null
-  } catch { return null }
-}
-
-function setSetting(key: string, value: string): void {
-  getDatabase().prepare(
-    'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
-  ).run(key, value)
-}
+import { getPodcastSetting, setPodcastSetting } from './podcastManager'
 
 function buildAuth(user: string, appPassword: string): string {
   // WordPress Application Passwords are displayed with spaces for readability
@@ -21,28 +9,28 @@ function buildAuth(user: string, appPassword: string): string {
   return 'Basic ' + Buffer.from(`${user}:${cleanPass}`).toString('base64')
 }
 
-function wpConfig() {
-  const url = getSetting('wordpress_url')
-  const user = getSetting('wordpress_user')
-  const appPassword = getSetting('wordpress_app_password')
+function wpConfig(podcastId: number) {
+  const url = getPodcastSetting(podcastId, 'wordpress_url')
+  const user = getPodcastSetting(podcastId, 'wordpress_user')
+  const appPassword = getPodcastSetting(podcastId, 'wordpress_app_password')
   if (!url || !user || !appPassword) {
-    throw new Error('Configure as credenciais do WordPress em Configurações.')
+    throw new Error('Configure as credenciais do WordPress nas configurações deste podcast.')
   }
   const baseUrl = url.replace(/\/wp-admin\/?$/, '').replace(/\/$/, '')
   return { baseUrl, auth: buildAuth(user, appPassword) }
 }
 
-function wpPostType(): string {
-  return getSetting('wordpress_post_type') || 'posts'
+function wpPostType(podcastId: number): string {
+  return getPodcastSetting(podcastId, 'wordpress_post_type') || 'posts'
 }
 
-async function uploadMediaFromUrl(imageUrl: string, filename: string): Promise<number> {
+async function uploadMediaFromUrl(podcastId: number, imageUrl: string, filename: string): Promise<number> {
   const imgRes = await fetch(imageUrl)
   if (!imgRes.ok) throw new Error(`Download thumbnail: ${imgRes.status}`)
   const buffer = await imgRes.arrayBuffer()
   const ext = filename.split('.').pop()?.toLowerCase() ?? 'jpg'
   const contentType = ext === 'png' ? 'image/png' : 'image/jpeg'
-  const mediaRes = await wpFetch('/media', {
+  const mediaRes = await wpFetch(podcastId, '/media', {
     method: 'POST',
     headers: {
       'Content-Disposition': `attachment; filename="${filename}"`,
@@ -54,8 +42,8 @@ async function uploadMediaFromUrl(imageUrl: string, filename: string): Promise<n
   return media.id
 }
 
-async function wpFetch(path: string, init?: RequestInit) {
-  const { baseUrl, auth } = wpConfig()
+async function wpFetch(podcastId: number, path: string, init?: RequestInit) {
+  const { baseUrl, auth } = wpConfig(podcastId)
   const res = await fetch(`${baseUrl}/wp-json/wp/v2${path}`, {
     ...init,
     headers: { Authorization: auth, ...init?.headers },
@@ -65,6 +53,12 @@ async function wpFetch(path: string, init?: RequestInit) {
     throw new Error(`WordPress ${res.status}: ${text}`)
   }
   return res
+}
+
+function getEpisodePodcastId(episodeId: number): number {
+  const row = getDatabase().prepare('SELECT podcast_id FROM episodes WHERE id = ?').get(episodeId) as { podcast_id: number } | undefined
+  if (!row) throw new Error('Episode not found')
+  return row.podcast_id
 }
 
 interface WpRawPost {
@@ -91,13 +85,19 @@ function mapPost(p: WpRawPost) {
   }
 }
 
+function setEpisodeLinkedPostId(episodeId: number, postId: string): void {
+  getDatabase().prepare(
+    'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+  ).run(`episode_${episodeId}_wp_post_id`, postId)
+}
+
 export function registerWordPressHandlers(ipcMain: IpcMain): void {
 
-  ipcMain.handle('wordpress:isConfigured', () => {
-    try { wpConfig(); return true } catch { return false }
+  ipcMain.handle('wordpress:isConfigured', (_event, podcastId: number) => {
+    try { wpConfig(podcastId); return true } catch { return false }
   })
 
-  ipcMain.handle('wordpress:testConnection', async (_event, opts?: {
+  ipcMain.handle('wordpress:testConnection', async (_event, podcastId: number, opts?: {
     url: string; user: string; appPassword: string
   }) => {
     let baseUrl: string, auth: string
@@ -105,7 +105,7 @@ export function registerWordPressHandlers(ipcMain: IpcMain): void {
       baseUrl = opts.url.replace(/\/wp-admin\/?$/, '').replace(/\/$/, '')
       auth = buildAuth(opts.user, opts.appPassword)
     } else {
-      const cfg = wpConfig()
+      const cfg = wpConfig(podcastId)
       baseUrl = cfg.baseUrl
       auth = cfg.auth
     }
@@ -130,17 +130,17 @@ export function registerWordPressHandlers(ipcMain: IpcMain): void {
 
     // Save credentials on success
     if (opts) {
-      setSetting('wordpress_url', opts.url)
-      setSetting('wordpress_user', opts.user)
-      setSetting('wordpress_app_password', opts.appPassword)
+      setPodcastSetting(podcastId, 'wordpress_url', opts.url)
+      setPodcastSetting(podcastId, 'wordpress_user', opts.user)
+      setPodcastSetting(podcastId, 'wordpress_app_password', opts.appPassword)
     }
-    setSetting('wordpress_post_type', postType)
+    setPodcastSetting(podcastId, 'wordpress_post_type', postType)
 
     return { connected: true, siteName: baseUrl.replace(/^https?:\/\//, ''), userName: user.name, postType }
   })
 
-  ipcMain.handle('wordpress:listPosts', async (_event, query?: string) => {
-    const pt = wpPostType()
+  ipcMain.handle('wordpress:listPosts', async (_event, podcastId: number, query?: string) => {
+    const pt = wpPostType(podcastId)
     const params = new URLSearchParams({
       per_page: '20',
       orderby: 'modified',
@@ -152,7 +152,7 @@ export function registerWordPressHandlers(ipcMain: IpcMain): void {
     const editParams = new URLSearchParams(params)
     editParams.set('context', 'edit')
     editParams.set('status', 'publish,draft,pending,private')
-    const { baseUrl, auth } = wpConfig()
+    const { baseUrl, auth } = wpConfig(podcastId)
     const editRes = await fetch(`${baseUrl}/wp-json/wp/v2/${pt}?${editParams}`, {
       headers: { Authorization: auth },
     })
@@ -162,20 +162,20 @@ export function registerWordPressHandlers(ipcMain: IpcMain): void {
     }
 
     // Fall back to view context (works for authors)
-    const res = await wpFetch(`/${pt}?${params}`)
+    const res = await wpFetch(podcastId, `/${pt}?${params}`)
     const posts = await res.json() as WpRawPost[]
     return posts.map(mapPost)
   })
 
-  ipcMain.handle('wordpress:getPost', async (_event, postId: number) => {
-    const pt = wpPostType()
-    const res = await wpFetch(`/${pt}/${postId}?context=edit`)
+  ipcMain.handle('wordpress:getPost', async (_event, podcastId: number, postId: number) => {
+    const pt = wpPostType(podcastId)
+    const res = await wpFetch(podcastId, `/${pt}/${postId}?context=edit`)
     const post = await res.json() as WpRawPost
     return mapPost(post)
   })
 
   ipcMain.handle('wordpress:linkPost', (_event, episodeId: number, postId: number) => {
-    setSetting(`episode_${episodeId}_wp_post_id`, String(postId))
+    setEpisodeLinkedPostId(episodeId, String(postId))
     return { success: true }
   })
 
@@ -192,12 +192,14 @@ export function registerWordPressHandlers(ipcMain: IpcMain): void {
     status?: 'draft' | 'publish'
     featuredImageUrl?: string
   }) => {
-    const pt = wpPostType()
+    const podcastId = getEpisodePodcastId(opts.episodeId)
+    const pt = wpPostType(podcastId)
 
     let featuredMedia: number | undefined
     if (opts.featuredImageUrl) {
       try {
         featuredMedia = await uploadMediaFromUrl(
+          podcastId,
           opts.featuredImageUrl,
           `episode-${opts.episodeId}-thumb.jpg`,
         )
@@ -206,7 +208,7 @@ export function registerWordPressHandlers(ipcMain: IpcMain): void {
       }
     }
 
-    const res = await wpFetch(`/${pt}`, {
+    const res = await wpFetch(podcastId, `/${pt}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -218,25 +220,27 @@ export function registerWordPressHandlers(ipcMain: IpcMain): void {
       }),
     })
     const post = await res.json() as { id: number; link: string }
-    setSetting(`episode_${opts.episodeId}_wp_post_id`, String(post.id))
+    setEpisodeLinkedPostId(opts.episodeId, String(post.id))
     return { postId: post.id, postUrl: post.link }
   })
 
   ipcMain.handle('wordpress:update', async (_event, opts: {
+    episodeId: number
     postId: number
     title?: string
     content?: string
     slug?: string
     status?: 'draft' | 'publish'
   }) => {
+    const podcastId = getEpisodePodcastId(opts.episodeId)
     const body: Record<string, unknown> = {}
     if (opts.title !== undefined) body.title = opts.title
     if (opts.content !== undefined) body.content = opts.content
     if (opts.slug) body.slug = opts.slug
     if (opts.status) body.status = opts.status
 
-    const pt = wpPostType()
-    const res = await wpFetch(`/${pt}/${opts.postId}`, {
+    const pt = wpPostType(podcastId)
+    const res = await wpFetch(podcastId, `/${pt}/${opts.postId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -245,9 +249,9 @@ export function registerWordPressHandlers(ipcMain: IpcMain): void {
     return mapPost(post)
   })
 
-  ipcMain.handle('wordpress:delete', async (_event, postId: number) => {
-    const pt = wpPostType()
-    await wpFetch(`/${pt}/${postId}?force=true`, { method: 'DELETE' })
+  ipcMain.handle('wordpress:delete', async (_event, podcastId: number, postId: number) => {
+    const pt = wpPostType(podcastId)
+    await wpFetch(podcastId, `/${pt}/${postId}?force=true`, { method: 'DELETE' })
     return { success: true }
   })
 }

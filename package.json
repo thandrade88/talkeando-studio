@@ -1,6 +1,6 @@
 {
   "name": "talkeando-studio",
-  "version": "0.1.0",
+  "version": "2.0.0",
   "description": "Content Operating System for Talkeando Podcast",
   "main": "dist-electron/main/index.js",
   "scripts": {

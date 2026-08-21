@@ -27,9 +27,17 @@ interface WhisperSetupStatus {
 
 interface Window {
   api: {
-    getEpisodes: () => Promise<Episode[]>
+    getPodcasts: () => Promise<Podcast[]>
+    getPodcast: (id: number) => Promise<Podcast>
+    createPodcast: (name: string) => Promise<Podcast>
+    updatePodcast: (id: number, data: { name?: string }) => Promise<Podcast>
+    deletePodcast: (id: number) => Promise<{ success: boolean }>
+    getPodcastSettings: (podcastId: number) => Promise<Record<string, string>>
+    setPodcastSetting: (podcastId: number, key: string, value: string) => Promise<{ success: boolean }>
+
+    getEpisodes: (podcastId?: number) => Promise<Episode[]>
     getEpisode: (id: number) => Promise<Episode>
-    importEpisode: (filePath: string) => Promise<Episode>
+    importEpisode: (filePath: string, podcastId: number) => Promise<Episode>
     deleteEpisode: (id: number) => Promise<{ success: boolean }>
     updateEpisode: (id: number, data: Partial<Episode>) => Promise<Episode>
 
@@ -99,32 +107,39 @@ interface Window {
     getAllSettings: () => Promise<Record<string, string>>
 
     // YouTube
-    getYouTubeStatus: () => Promise<{ clientId: string | null; connected: boolean; authChannelId: string | null; mainChannelId: string | null; cutsChannelId: string | null }>
+    getYouTubeStatus: (podcastId?: number) => Promise<{ clientId: string | null; connected: boolean; authChannelId: string | null; mainChannelId: string | null; cutsChannelId: string | null }>
     saveYouTubeCredentials: (clientId: string, clientSecret: string) => Promise<{ success: boolean }>
     connectYouTube: () => Promise<{ success: boolean; channels: YouTubeChannel[] }>
     disconnectYouTube: () => Promise<{ success: boolean }>
     listYouTubeChannels: () => Promise<YouTubeChannel[]>
     resolveYouTubeChannel: (channelId: string) => Promise<YouTubeChannel>
-    saveYouTubeChannelConfig: (mainChannelId: string, cutsChannelId: string) => Promise<{ success: boolean }>
+    saveYouTubeChannelConfig: (podcastId: number, mainChannelId: string, cutsChannelId: string) => Promise<{ success: boolean }>
     connectForChannel: (channelId: string) => Promise<{ success: boolean }>
     getChannelAuthStatus: (channelId: string) => Promise<{ authenticated: boolean }>
     listRecentVideos: (channelId: string, query?: string) => Promise<YouTubeVideo[]>
     uploadToYouTube: (opts: { filePath: string; title: string; description: string; channelId: string; thumbnailPath?: string; tags?: string[]; privacyStatus?: 'public' | 'unlisted' | 'private' }) => Promise<{ videoId: string; videoUrl: string }>
-    updateYouTubeVideoMetadata: (opts: { videoId: string; title: string; description: string; tags?: string[] }) => Promise<{ success: boolean; videoUrl: string }>
+    updateYouTubeVideoMetadata: (opts: { podcastId: number; videoId: string; title: string; description: string; tags?: string[] }) => Promise<{ success: boolean; videoUrl: string }>
     onYouTubeUploadProgress: (cb: (pct: number) => void) => () => void
     onYouTubeAuthStarted: (cb: (url: string) => void) => () => void
 
     // WordPress
-    isWordPressConfigured: () => Promise<boolean>
-    testWordPressConnection: (opts?: { url: string; user: string; appPassword: string }) => Promise<{ connected: boolean; siteName: string; userName: string | null; postType: string }>
-    listWordPressPosts: (query?: string) => Promise<WordPressPost[]>
-    getWordPressPost: (postId: number) => Promise<WordPressPost>
+    isWordPressConfigured: (podcastId: number) => Promise<boolean>
+    testWordPressConnection: (podcastId: number, opts?: { url: string; user: string; appPassword: string }) => Promise<{ connected: boolean; siteName: string; userName: string | null; postType: string }>
+    listWordPressPosts: (podcastId: number, query?: string) => Promise<WordPressPost[]>
+    getWordPressPost: (podcastId: number, postId: number) => Promise<WordPressPost>
     linkWordPressPost: (episodeId: number, postId: number) => Promise<{ success: boolean }>
     unlinkWordPressPost: (episodeId: number) => Promise<{ success: boolean }>
     publishToWordPress: (opts: { episodeId: number; title: string; content: string; slug?: string; status?: 'draft' | 'publish'; featuredImageUrl?: string }) => Promise<{ postId: number; postUrl: string }>
-    updateWordPressPost: (opts: { postId: number; title?: string; content?: string; slug?: string; status?: 'draft' | 'publish' }) => Promise<WordPressPost>
-    deleteWordPressPost: (postId: number) => Promise<{ success: boolean }>
+    updateWordPressPost: (opts: { episodeId: number; postId: number; title?: string; content?: string; slug?: string; status?: 'draft' | 'publish' }) => Promise<WordPressPost>
+    deleteWordPressPost: (podcastId: number, postId: number) => Promise<{ success: boolean }>
   }
+}
+
+interface Podcast {
+  id: number
+  name: string
+  created_at: string
+  episode_count?: number
 }
 
 interface WordPressPost {
@@ -153,6 +168,7 @@ interface YouTubeVideo {
 
 interface Episode {
   id: number
+  podcast_id: number
   title: string
   file_path: string
   audio_path: string

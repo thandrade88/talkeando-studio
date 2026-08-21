@@ -28,6 +28,20 @@ export function setupDatabase(dbPathOverride?: string): void {
   db.pragma('foreign_keys = ON')
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS podcasts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS podcast_settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      podcast_id INTEGER NOT NULL REFERENCES podcasts(id) ON DELETE CASCADE,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL DEFAULT '',
+      UNIQUE(podcast_id, key)
+    );
+
     CREATE TABLE IF NOT EXISTS episodes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
@@ -86,19 +100,34 @@ export function setupDatabase(dbPathOverride?: string): void {
       ('openai_api_key', ''),
       ('gemini_api_key', ''),
       ('ai_provider', 'claude'),
-      ('blog_post_prompt', ''),
-      ('resume_prompt', ''),
       ('whisper_model', 'base'),
       ('default_language', 'auto'),
-      ('output_directory', ''),
-      ('wordpress_url', ''),
-      ('youtube_prompt', ''),
-      ('instagram_prompt', '');
+      ('output_directory', '');
   `)
 
   addColumnIfMissing(db, 'episodes', 'audio_path', "TEXT DEFAULT ''")
   addColumnIfMissing(db, 'episodes', 'thumbnail_url', "TEXT DEFAULT ''")
+  addColumnIfMissing(db, 'episodes', 'podcast_id', 'INTEGER REFERENCES podcasts(id)')
   addColumnIfMissing(db, 'clips', 'thumbnail_path', "TEXT DEFAULT ''")
   addColumnIfMissing(db, 'clips', 'summary', "TEXT DEFAULT ''")
   addColumnIfMissing(db, 'clips', 'youtube_video_id', "TEXT DEFAULT ''")
+
+  backfillDefaultPodcast(db)
+}
+
+// Multi-podcast support (2.0) added `podcasts` as the parent of `episodes`.
+// Any episode left without a podcast_id (pre-2.0 installs, or an episode
+// imported before the first podcast existed) is assigned to a single
+// auto-created podcast so nothing becomes orphaned.
+function backfillDefaultPodcast(db: Database.Database): void {
+  const orphaned = db.prepare('SELECT COUNT(*) as n FROM episodes WHERE podcast_id IS NULL').get() as { n: number } | undefined
+  if (!orphaned || orphaned.n === 0) return
+
+  let target = db.prepare('SELECT id FROM podcasts ORDER BY id ASC LIMIT 1').get() as { id: number } | undefined
+  if (!target) {
+    const result = db.prepare('INSERT INTO podcasts (name) VALUES (?)').run('Meu Podcast')
+    target = { id: result.lastInsertRowid as number }
+  }
+
+  db.prepare('UPDATE episodes SET podcast_id = ? WHERE podcast_id IS NULL').run(target.id)
 }

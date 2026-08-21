@@ -105,6 +105,7 @@ protocol.registerSchemesAsPrivileged([
   }
 ])
 import { setupDatabase } from '../services/database'
+import { registerPodcastHandlers } from '../services/podcastManager'
 import { registerEpisodeHandlers } from '../services/episodeManager'
 import { registerTranscriptHandlers } from '../services/transcriptEngine'
 import { registerAIHandlers } from '../services/aiEngine'
@@ -210,6 +211,7 @@ app.whenReady().then(async () => {
   })
 
   setupDatabase()
+  registerPodcastHandlers(ipcMain)
   registerEpisodeHandlers(ipcMain)
   registerTranscriptHandlers(ipcMain)
   registerAIHandlers(ipcMain)

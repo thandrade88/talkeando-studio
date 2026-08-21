@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Mic2, Download, Terminal, Check, Loader2, ChevronRight, AlertCircle } from 'lucide-react'
 import { cn } from '../lib/utils'
 
-type Step = 'welcome' | 'whisper' | 'model' | 'apikey' | 'done'
+type Step = 'welcome' | 'whisper' | 'model' | 'apikey' | 'podcast' | 'done'
 
 interface Props {
   onComplete: () => void
@@ -67,6 +67,13 @@ export default function SetupWizard({ onComplete }: Props) {
     if (apiKey.trim()) {
       await window.api.setSetting('anthropic_api_key', apiKey.trim())
     }
+    setStep('podcast')
+  }
+
+  async function handleCreatePodcast(name: string) {
+    if (name.trim()) {
+      await window.api.createPodcast(name.trim())
+    }
     setStep('done')
   }
 
@@ -130,8 +137,12 @@ export default function SetupWizard({ onComplete }: Props) {
               apiKey={apiKey}
               onApiKeyChange={setApiKey}
               onNext={handleSaveApiKey}
-              onSkip={() => setStep('done')}
+              onSkip={() => setStep('podcast')}
             />
+          )}
+
+          {step === 'podcast' && (
+            <PodcastStep onNext={handleCreatePodcast} />
           )}
 
           {step === 'done' && (
@@ -141,7 +152,7 @@ export default function SetupWizard({ onComplete }: Props) {
 
         {/* Progress dots */}
         <div className="flex justify-center gap-1.5 pb-5">
-          {(['welcome', 'whisper', 'model', 'apikey', 'done'] as Step[]).map((s) => (
+          {(['welcome', 'whisper', 'model', 'apikey', 'podcast', 'done'] as Step[]).map((s) => (
             <div
               key={s}
               className={cn(
@@ -444,6 +455,43 @@ function ApiKeyStep({
           {apiKey.trim() ? 'Salvar e continuar' : 'Continuar'}
         </button>
       </div>
+    </div>
+  )
+}
+
+function PodcastStep({ onNext }: { onNext: (name: string) => void }) {
+  const [name, setName] = useState('')
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-base font-semibold mb-1">Seu primeiro podcast</h2>
+        <p className="text-sm text-muted-foreground">
+          Cada podcast tem seus próprios episódios, WordPress, canais do YouTube e prompts de IA.
+          Você pode adicionar outros depois pela barra lateral.
+        </p>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-xs text-muted-foreground">Nome do podcast</label>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Talkeando Podcast"
+          className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary/40"
+          autoFocus
+          onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) onNext(name) }}
+        />
+      </div>
+
+      <button
+        onClick={() => onNext(name)}
+        disabled={!name.trim()}
+        className="w-full bg-primary hover:bg-primary/90 text-white py-2.5 rounded-lg text-sm font-medium disabled:opacity-50"
+      >
+        Continuar
+      </button>
     </div>
   )
 }

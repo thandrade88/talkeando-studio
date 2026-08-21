@@ -55,16 +55,19 @@ function extractAudioForProject(
 }
 
 export function registerEpisodeHandlers(ipcMain: IpcMain): void {
-  ipcMain.handle('episodes:getAll', () => {
+  ipcMain.handle('episodes:getAll', (_event, podcastId?: number) => {
     const db = getDatabase()
-    return db.prepare(`
+    const base = `
       SELECT e.*,
         (SELECT COUNT(*) FROM transcripts WHERE episode_id = e.id) as transcript_count,
         (SELECT COUNT(*) FROM clips WHERE episode_id = e.id) as clip_count,
         (SELECT COUNT(*) FROM generated_content WHERE episode_id = e.id) as content_count
       FROM episodes e
-      ORDER BY e.created_at DESC
-    `).all()
+    `
+    if (podcastId !== undefined) {
+      return db.prepare(`${base} WHERE e.podcast_id = ? ORDER BY e.created_at DESC`).all(podcastId)
+    }
+    return db.prepare(`${base} ORDER BY e.created_at DESC`).all()
   })
 
   ipcMain.handle('episodes:getById', (_event, id: number) => {
@@ -72,7 +75,7 @@ export function registerEpisodeHandlers(ipcMain: IpcMain): void {
     return db.prepare('SELECT * FROM episodes WHERE id = ?').get(id)
   })
 
-  ipcMain.handle('episodes:import', async (event, filePath: string) => {
+  ipcMain.handle('episodes:import', async (event, filePath: string, podcastId: number) => {
     const db = getDatabase()
     const ext = extname(filePath).toLowerCase()
     const allowedExts = ['.mp3', '.mp4', '.wav', '.m4a', '.ogg', '.flac', '.mov', '.avi', '.mkv', '.webm']
@@ -80,6 +83,7 @@ export function registerEpisodeHandlers(ipcMain: IpcMain): void {
     if (!allowedExts.includes(ext)) {
       throw new Error(`Formato não suportado: ${ext}`)
     }
+    if (!podcastId) throw new Error('Selecione um podcast antes de importar.')
 
     const stats = statSync(filePath)
     if (!stats.isFile()) throw new Error('Caminho inválido')
@@ -91,9 +95,9 @@ export function registerEpisodeHandlers(ipcMain: IpcMain): void {
 
     // Insert record and return immediately so the UI can show the episode card right away.
     const result = db.prepare(`
-      INSERT INTO episodes (title, file_path, status, audio_path)
-      VALUES (?, ?, 'imported', '')
-    `).run(title, filePath)
+      INSERT INTO episodes (title, file_path, status, audio_path, podcast_id)
+      VALUES (?, ?, 'imported', '', ?)
+    `).run(title, filePath, podcastId)
     const episodeId = result.lastInsertRowid as number
     const episode = db.prepare('SELECT * FROM episodes WHERE id = ?').get(episodeId)
 

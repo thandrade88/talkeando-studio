@@ -1,6 +1,12 @@
 import { create } from 'zustand'
 
+const SELECTED_PODCAST_KEY = 'talkeando_selected_podcast_id'
+
 interface AppState {
+  podcasts: Podcast[]
+  selectedPodcastId: number | null
+  podcastsLoaded: boolean
+
   episodes: Episode[]
   selectedEpisodeId: number | null
   isLoading: boolean
@@ -12,6 +18,13 @@ interface AppState {
   txProgress: number
   txStatus: string
   txEta: string | null
+
+  setPodcasts: (podcasts: Podcast[]) => void
+  addPodcast: (podcast: Podcast) => void
+  updatePodcastInStore: (podcast: Podcast) => void
+  removePodcastFromStore: (id: number) => void
+  selectPodcast: (id: number | null) => void
+  loadPodcasts: () => Promise<void>
 
   setEpisodes: (episodes: Episode[]) => void
   addEpisode: (episode: Episode) => void
@@ -27,6 +40,10 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
+  podcasts: [],
+  selectedPodcastId: null,
+  podcastsLoaded: false,
+
   episodes: [],
   selectedEpisodeId: null,
   isLoading: false,
@@ -36,6 +53,28 @@ export const useAppStore = create<AppState>((set, get) => ({
   txProgress: 0,
   txStatus: '',
   txEta: null,
+
+  setPodcasts: (podcasts) => set({ podcasts }),
+  addPodcast: (podcast) => set((s) => ({ podcasts: [...s.podcasts, podcast] })),
+  updatePodcastInStore: (podcast) =>
+    set((s) => ({ podcasts: s.podcasts.map((p) => (p.id === podcast.id ? podcast : p)) })),
+  removePodcastFromStore: (id) =>
+    set((s) => ({ podcasts: s.podcasts.filter((p) => p.id !== id) })),
+
+  selectPodcast: (id) => {
+    if (id !== null) localStorage.setItem(SELECTED_PODCAST_KEY, String(id))
+    set({ selectedPodcastId: id })
+    get().loadEpisodes()
+  },
+
+  loadPodcasts: async () => {
+    const podcasts = await window.api.getPodcasts()
+    const savedId = Number(localStorage.getItem(SELECTED_PODCAST_KEY))
+    const stillExists = podcasts.some((p) => p.id === savedId)
+    const selectedPodcastId = stillExists ? savedId : (podcasts[0]?.id ?? null)
+    set({ podcasts, selectedPodcastId, podcastsLoaded: true })
+    if (selectedPodcastId !== null) get().loadEpisodes()
+  },
 
   setEpisodes: (episodes) => set({ episodes }),
   addEpisode: (episode) => set((s) => ({ episodes: [episode, ...s.episodes] })),
@@ -52,9 +91,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ txProgress: progress, txStatus: status, txEta: eta }),
 
   loadEpisodes: async () => {
+    const podcastId = get().selectedPodcastId
+    if (podcastId === null) { set({ episodes: [] }); return }
     set({ isLoading: true, error: null })
     try {
-      const episodes = await window.api.getEpisodes()
+      const episodes = await window.api.getEpisodes(podcastId)
       set({ episodes, isLoading: false })
     } catch (err) {
       set({ error: String(err), isLoading: false })
