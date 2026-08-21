@@ -121,4 +121,21 @@ describe('EpisodeWorkspace — connecting a YouTube video', () => {
     expect(screen.queryByPlaceholderText('Buscar vídeo do YouTube…')).toBeNull()
     expect(mockApi.updateEpisode).not.toHaveBeenCalled()
   })
+
+  it('uses an encoded local media URL for Windows audio paths', async () => {
+    const windowsAudioPath = 'C:\\Users\\Talkeando\\Podcast Episodes\\ep 01.wav'
+    storeState.episodes = [makeEpisode({ file_path: windowsAudioPath, audio_path: windowsAudioPath })]
+    mockApi.getMediaServerPort.mockResolvedValue(5173)
+
+    renderWorkspace()
+
+    await screen.findByText('Título original do arquivo')
+    await waitFor(() => {
+      expect(document.querySelector('audio')).not.toBeNull()
+    })
+
+    expect(document.querySelector('audio')?.getAttribute('src')).toBe(
+      `http://127.0.0.1:5173/?p=${encodeURIComponent(windowsAudioPath)}`
+    )
+  })
 })
