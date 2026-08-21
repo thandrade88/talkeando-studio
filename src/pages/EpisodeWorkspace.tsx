@@ -633,9 +633,16 @@ function ContentTab({ episodeId }: { episodeId: number }) {
       } catch {
         content = activeContent.content
       }
-      if (wpPostId) {
+      // Re-read the linked post id fresh instead of trusting local state: the workspace's
+      // WordPress toolbar (a separate component with its own copy of this value) can link
+      // a post without this tab remounting, which would otherwise leave wpPostId stale here
+      // and cause a duplicate post to be created instead of updating the linked one.
+      const savedWpPostId = await window.api.getSetting(`episode_${episodeId}_wp_post_id`)
+      const currentWpPostId = savedWpPostId ? Number(savedWpPostId) : null
+      if (currentWpPostId !== wpPostId) setWpPostId(currentWpPostId)
+      if (currentWpPostId) {
         // Update: only sync content — never overwrite title or slug
-        const r = await window.api.updateWordPressPost({ postId: wpPostId, content })
+        const r = await window.api.updateWordPressPost({ postId: currentWpPostId, content })
         setWpResult(r.link)
         setWpSuccess('Conteúdo atualizado!')
         setTimeout(() => setWpSuccess(null), 3000)
