@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Settings as SettingsIcon, Globe, Check, Loader2, CheckCircle2, RotateCcw,
-  Youtube, Link, Unlink, ArrowLeft, Key,
+  Youtube, Link, Unlink, ArrowLeft, Key, Pencil, X,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { SaveButton } from '../components/SettingsUI'
+import { useAppStore } from '../store/useAppStore'
 
 const PROMPT_CONFIGS = [
   {
@@ -41,8 +42,14 @@ export default function PodcastSettings() {
   const { podcastId: podcastIdParam } = useParams<{ podcastId: string }>()
   const podcastId = Number(podcastIdParam)
   const navigate = useNavigate()
+  const updatePodcastInStore = useAppStore(s => s.updatePodcastInStore)
 
   const [podcast, setPodcast] = useState<Podcast | null>(null)
+  const [editingName, setEditingName] = useState(false)
+  const [nameDraft, setNameDraft] = useState('')
+  const [nameSaving, setNameSaving] = useState(false)
+  const [nameError, setNameError] = useState<string | null>(null)
+  const nameInputRef = useRef<HTMLInputElement>(null)
   const [activeTab, setActiveTab] = useState<Tab>('wordpress')
   const [settings, setSettings] = useState<Record<string, string>>({})
   const [saved, setSaved] = useState<Record<string, boolean>>({})
@@ -131,6 +138,34 @@ export default function PodcastSettings() {
       })
     })
   }, [podcastId])
+
+  function startEditingName() {
+    setNameDraft(podcast?.name ?? '')
+    setNameError(null)
+    setEditingName(true)
+  }
+
+  function cancelEditingName() {
+    setEditingName(false)
+    setNameError(null)
+  }
+
+  async function saveName() {
+    const trimmed = nameDraft.trim()
+    if (!trimmed) { setNameError('Nome não pode estar vazio.'); return }
+    if (trimmed === podcast?.name) { setEditingName(false); return }
+    setNameSaving(true); setNameError(null)
+    try {
+      const updated = await window.api.updatePodcast(podcastId, { name: trimmed })
+      setPodcast(updated)
+      updatePodcastInStore(updated)
+      setEditingName(false)
+    } catch (err) {
+      setNameError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setNameSaving(false)
+    }
+  }
 
   async function saveSetting(key: string, value: string) {
     await window.api.setPodcastSetting(podcastId, key, value)
@@ -246,6 +281,10 @@ export default function PodcastSettings() {
     } finally { setYtExtraLoading(false) }
   }
 
+  useEffect(() => {
+    if (editingName) nameInputRef.current?.focus()
+  }, [editingName])
+
   if (!podcastId) return null
 
   return (
@@ -257,10 +296,40 @@ export default function PodcastSettings() {
         >
           <ArrowLeft className="w-3.5 h-3.5" />Voltar
         </button>
-        <h1 className="text-lg font-semibold flex items-center gap-2">
-          <SettingsIcon className="w-5 h-5" />
-          Configurações — {podcast?.name ?? '...'}
-        </h1>
+        <div className="flex items-center gap-2">
+          <SettingsIcon className="w-5 h-5 shrink-0" />
+          <span className="text-lg font-semibold text-muted-foreground shrink-0">Configurações —</span>
+          {editingName ? (
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+              <input
+                ref={nameInputRef}
+                type="text"
+                value={nameDraft}
+                onChange={e => setNameDraft(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') saveName()
+                  if (e.key === 'Escape') cancelEditingName()
+                }}
+                disabled={nameSaving}
+                className="flex-1 min-w-0 bg-secondary border border-border rounded-lg px-2 py-1 text-lg font-semibold focus:outline-none focus:border-primary/40 disabled:opacity-50"
+              />
+              <button onClick={saveName} disabled={nameSaving}
+                className="p-1.5 text-muted-foreground hover:text-primary disabled:opacity-50 shrink-0">
+                {nameSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+              </button>
+              <button onClick={cancelEditingName} disabled={nameSaving}
+                className="p-1.5 text-muted-foreground hover:text-destructive disabled:opacity-50 shrink-0">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <button onClick={startEditingName} className="group flex items-center gap-1.5 min-w-0">
+              <h1 className="text-lg font-semibold truncate">{podcast?.name ?? '...'}</h1>
+              <Pencil className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+            </button>
+          )}
+        </div>
+        {nameError && <p className="text-xs text-destructive mt-1">{nameError}</p>}
         <p className="text-xs text-muted-foreground mt-0.5">
           WordPress, YouTube e prompts de IA valem só para este podcast.
         </p>
