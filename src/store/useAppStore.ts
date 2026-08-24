@@ -3,6 +3,9 @@ import { create } from 'zustand'
 const SELECTED_PODCAST_KEY = 'talkeando_selected_podcast_id'
 
 interface AppState {
+  isMultiPodcast: boolean
+  loadEdition: () => Promise<void>
+
   podcasts: Podcast[]
   selectedPodcastId: number | null
   podcastsLoaded: boolean
@@ -40,6 +43,12 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
+  isMultiPodcast: true,
+  loadEdition: async () => {
+    const edition = await window.api.getEdition()
+    set({ isMultiPodcast: edition === 'studio' })
+  },
+
   podcasts: [],
   selectedPodcastId: null,
   podcastsLoaded: false,

@@ -19,6 +19,24 @@ of the whole app. For the story of how it got here:
 - **Publishing** — WordPress (create/update posts, featured image from a linked YouTube thumbnail) and YouTube (OAuth upload, metadata sync) direct from the workspace.
 - **Clip Export** — Mark and export audio/video clips via FFmpeg, with optional OpusClip hand-off for Shorts/Reels/TikTok cuts.
 
+## Editions
+
+Talkeando Studio ships as two SKUs from the same codebase, switched by a
+build-time `EDITION` flag rather than a runtime setting:
+
+| Edition | Podcasts | Build command |
+|---|---|---|
+| **Studio** (default) | Unlimited | `npm run build:mac` / `npm run build:win` |
+| **Solo** | Capped at one | `npm run build:solo:mac` / `npm run build:solo:win` |
+
+The flag is injected into the main-process bundle at compile time
+(`electron.vite.config.ts` → `electron/config/edition.ts`), so a packaged
+Solo installer can't have its limit lifted by setting an environment
+variable at launch. The cap is enforced in the `podcasts:create` IPC handler
+(`podcastManager.ts`) — the actual trust boundary — and mirrored in the UI
+via `window.api.getEdition()` (hides the Sidebar's "Novo podcast" control
+in Solo).
+
 ## Tech Stack
 
 | Layer | Technology |
@@ -54,11 +72,15 @@ On first launch the setup wizard will guide you through installing Whisper.cpp a
 ### Build
 
 ```bash
-# macOS
+# macOS — Studio (unlimited podcasts)
 npm run build:mac
 
 # Windows (run on a Windows machine or via GitHub Actions)
 npm run build:win
+
+# Solo edition (capped at one podcast) — see Editions below
+npm run build:solo:mac
+npm run build:solo:win
 ```
 
 ## Windows Installer (CI)
@@ -98,6 +120,8 @@ Settings are split by scope:
 electron/
   main/           — Electron main process
   preload/        — contextBridge (window.api)
+  config/
+    edition.ts          — Solo vs Studio build-time flag (see Editions above)
   services/
     database.ts         — SQLite setup + the podcasts backfill migration
     podcastManager.ts    — Podcast CRUD + per-podcast settings primitives

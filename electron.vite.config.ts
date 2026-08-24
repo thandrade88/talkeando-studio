@@ -2,9 +2,17 @@ import { resolve } from 'path'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 
+// Which edition this build is for — baked in at build time so a packaged
+// installer can't have its podcast limit lifted by setting an env var at
+// launch. Defaults to 'studio' (the full multi-podcast build) for local dev.
+const EDITION = process.env.EDITION === 'solo' ? 'solo' : 'studio'
+
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
+    define: {
+      __EDITION__: JSON.stringify(EDITION)
+    },
     build: {
       rollupOptions: {
         input: resolve(__dirname, 'electron/main/index.ts'),

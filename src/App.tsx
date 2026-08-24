@@ -11,6 +11,7 @@ import { formatEta } from './lib/utils'
 
 export default function App() {
   const loadPodcasts = useAppStore((s) => s.loadPodcasts)
+  const loadEdition = useAppStore((s) => s.loadEdition)
   const transcribingEpisodeId  = useAppStore(s => s.transcribingEpisodeId)
   const transcriptionStartedAt = useAppStore(s => s.transcriptionStartedAt)
   const setTranscribingEpisode = useAppStore(s => s.setTranscribingEpisode)
@@ -26,7 +27,8 @@ export default function App() {
       setSetupChecked(true)
     })
     loadPodcasts()
-  }, [loadPodcasts])
+    loadEdition()
+  }, [loadPodcasts, loadEdition])
 
   // Global transcription progress listener — survives all navigation
   useEffect(() => {

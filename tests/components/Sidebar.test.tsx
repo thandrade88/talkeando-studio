@@ -14,6 +14,7 @@ type SidebarState = {
   selectedPodcastId: number | null
   selectPodcast: (id: number) => void
   addPodcast: (p: Podcast) => void
+  isMultiPodcast: boolean
   transcribingEpisodeId: number | null
   txProgress: number
   txStatus: string
@@ -25,6 +26,7 @@ const storeState: SidebarState = {
   selectedPodcastId: null,
   selectPodcast: vi.fn(),
   addPodcast: vi.fn(),
+  isMultiPodcast: true,
   transcribingEpisodeId: null,
   txProgress: 0,
   txStatus: '',
@@ -55,6 +57,7 @@ describe('Sidebar', () => {
     vi.clearAllMocks()
     storeState.podcasts = [makePodcast()]
     storeState.selectedPodcastId = 1
+    storeState.isMultiPodcast = true
     storeState.transcribingEpisodeId = null
     vi.mocked(useAppStore).mockImplementation(
       (selector: (s: SidebarState) => unknown) => selector(storeState) as never
@@ -122,5 +125,11 @@ describe('Sidebar', () => {
     storeState.transcribingEpisodeId = 7
     renderSidebar()
     expect(screen.getByText('Transcrevendo...')).toBeDefined()
+  })
+
+  it('hides the "Novo podcast" control in the solo edition', () => {
+    storeState.isMultiPodcast = false
+    renderSidebar()
+    expect(screen.queryByText('Novo podcast')).toBeNull()
   })
 })

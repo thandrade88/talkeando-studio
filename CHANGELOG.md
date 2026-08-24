@@ -22,8 +22,17 @@ entity of the whole tree.
 - Sidebar rebuilt as an expandable Podcasts tree: each podcast nests its own
   Episódios and its own "Configurações do podcast".
 - New per-podcast Settings screen (`PodcastSettings.tsx`) for WordPress
-  credentials, YouTube channel assignment, and AI content prompts.
+  credentials, YouTube channel assignment, and AI content prompts, including
+  inline podcast rename in the screen's header.
 - A "name your first podcast" step in the first-run Setup Wizard.
+- Solo vs. Studio editions — a build-time `EDITION` flag
+  (`electron/config/edition.ts`, injected via `define` in
+  `electron.vite.config.ts`) caps the Solo SKU at one podcast. Enforced
+  server-side in the `podcasts:create` IPC handler (the actual trust
+  boundary), surfaced to the renderer via `window.api.getEdition()` /
+  `useAppStore().isMultiPodcast`, and gates the Sidebar's "Novo podcast"
+  control. New `build:solo`, `build:solo:win`, `build:solo:mac` scripts
+  produce a separately-branded `com.talkeando.studio.solo` installer.
 
 ### Changed
 - WordPress publishing (`wordpressService.ts`) is fully per-podcast: site URL,

@@ -13,6 +13,12 @@ vi.mock('../../electron/services/database', () => ({
   getDatabase: vi.fn(() => mockDb),
 }))
 
+const editionState = { IS_MULTI_PODCAST: true }
+vi.mock('../../electron/config/edition', () => ({
+  EDITION: 'studio',
+  get IS_MULTI_PODCAST() { return editionState.IS_MULTI_PODCAST },
+}))
+
 import { ipcMain } from 'electron'
 import {
   registerPodcastHandlers,
@@ -64,6 +70,46 @@ describe('podcasts:create', () => {
     registerPodcastHandlers(ipcMain as never)
 
     expect(() => handlers['podcasts:create']({}, '   ')).toThrow('Nome do podcast não pode estar vazio')
+  })
+})
+
+describe('podcasts:create — solo edition cap', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    editionState.IS_MULTI_PODCAST = true
+  })
+
+  it('allows creating the first podcast in the solo edition', async () => {
+    editionState.IS_MULTI_PODCAST = false
+    const handlers = captureHandlers()
+    registerPodcastHandlers(ipcMain as never)
+    mockStmt.get
+      .mockReturnValueOnce({ n: 0 })                     // existing podcast count
+      .mockReturnValueOnce({ id: 1, name: 'Meu Show' })  // select after insert
+
+    await handlers['podcasts:create']({}, 'Meu Show')
+
+    expect(mockStmt.run).toHaveBeenCalledWith('Meu Show')
+  })
+
+  it('rejects a second podcast in the solo edition', () => {
+    editionState.IS_MULTI_PODCAST = false
+    const handlers = captureHandlers()
+    registerPodcastHandlers(ipcMain as never)
+    mockStmt.get.mockReturnValue({ n: 1 }) // existing podcast count
+
+    expect(() => handlers['podcasts:create']({}, 'Segundo Show')).toThrow('suporta apenas um podcast')
+  })
+
+  it('allows unlimited podcasts in the studio edition', async () => {
+    editionState.IS_MULTI_PODCAST = true
+    const handlers = captureHandlers()
+    registerPodcastHandlers(ipcMain as never)
+    mockStmt.get.mockReturnValue({ id: 2, name: 'Terceiro Show' })
+
+    await handlers['podcasts:create']({}, 'Terceiro Show')
+
+    expect(mockStmt.run).toHaveBeenCalledWith('Terceiro Show')
   })
 })
 

@@ -12,6 +12,7 @@ export default function Sidebar() {
   const selectedPodcastId  = useAppStore((s) => s.selectedPodcastId)
   const selectPodcast      = useAppStore((s) => s.selectPodcast)
   const addPodcast         = useAppStore((s) => s.addPodcast)
+  const isMultiPodcast     = useAppStore((s) => s.isMultiPodcast)
 
   const transcribingEpisodeId = useAppStore((s) => s.transcribingEpisodeId)
   const txProgress = useAppStore((s) => s.txProgress)
@@ -115,27 +116,29 @@ export default function Sidebar() {
           )
         })}
 
-        {creating ? (
-          <input
-            autoFocus
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            onBlur={createPodcast}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') createPodcast()
-              if (e.key === 'Escape') { setCreating(false); setNewName('') }
-            }}
-            placeholder="Nome do podcast"
-            className="w-full px-2 py-1.5 rounded-md text-sm bg-secondary border border-primary/40 focus:outline-none"
-          />
-        ) : (
-          <button
-            onClick={() => setCreating(true)}
-            className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Novo podcast
-          </button>
+        {isMultiPodcast && (
+          creating ? (
+            <input
+              autoFocus
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onBlur={createPodcast}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') createPodcast()
+                if (e.key === 'Escape') { setCreating(false); setNewName('') }
+              }}
+              placeholder="Nome do podcast"
+              className="w-full px-2 py-1.5 rounded-md text-sm bg-secondary border border-primary/40 focus:outline-none"
+            />
+          ) : (
+            <button
+              onClick={() => setCreating(true)}
+              className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Novo podcast
+            </button>
+          )
         )}
 
         <div className="pt-3 mt-2 border-t border-border">

@@ -2,6 +2,9 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
 const api = {
+  // App
+  getEdition: () => ipcRenderer.invoke('app:getEdition') as Promise<'solo' | 'studio'>,
+
   // Podcasts
   getPodcasts: () => ipcRenderer.invoke('podcasts:getAll'),
   getPodcast: (id: number) => ipcRenderer.invoke('podcasts:getById', id),

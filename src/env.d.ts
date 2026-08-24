@@ -27,6 +27,8 @@ interface WhisperSetupStatus {
 
 interface Window {
   api: {
+    getEdition: () => Promise<'solo' | 'studio'>
+
     getPodcasts: () => Promise<Podcast[]>
     getPodcast: (id: number) => Promise<Podcast>
     createPodcast: (name: string) => Promise<Podcast>

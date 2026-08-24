@@ -1,5 +1,6 @@
 import { IpcMain } from 'electron'
 import { getDatabase } from './database'
+import { EDITION, IS_MULTI_PODCAST } from '../config/edition'
 
 // ─── podcast-scoped settings ─────────────────────────────────────────────────
 // Mirrors the flat `settings` table's get/set shape, but keyed per podcast —
@@ -30,6 +31,8 @@ export function getAllPodcastSettings(podcastId: number): Record<string, string>
 // ─── IPC handlers ────────────────────────────────────────────────────────────
 
 export function registerPodcastHandlers(ipcMain: IpcMain): void {
+  ipcMain.handle('app:getEdition', () => EDITION)
+
   ipcMain.handle('podcasts:getAll', () => {
     const db = getDatabase()
     return db.prepare(`
@@ -49,6 +52,10 @@ export function registerPodcastHandlers(ipcMain: IpcMain): void {
     const trimmed = name.trim()
     if (!trimmed) throw new Error('Nome do podcast não pode estar vazio.')
     const db = getDatabase()
+    if (!IS_MULTI_PODCAST) {
+      const existing = db.prepare('SELECT COUNT(*) as n FROM podcasts').get() as { n: number }
+      if (existing.n >= 1) throw new Error('Esta edição do Talkeando Studio suporta apenas um podcast.')
+    }
     const result = db.prepare('INSERT INTO podcasts (name) VALUES (?)').run(trimmed)
     return db.prepare('SELECT * FROM podcasts WHERE id = ?').get(result.lastInsertRowid)
   })
