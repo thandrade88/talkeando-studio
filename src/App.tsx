@@ -5,11 +5,13 @@ import SetupWizard from './components/SetupWizard'
 import Dashboard from './pages/Dashboard'
 import EpisodeWorkspace from './pages/EpisodeWorkspace'
 import Settings from './pages/Settings'
+import PodcastSettings from './pages/PodcastSettings'
 import { useAppStore } from './store/useAppStore'
 import { formatEta } from './lib/utils'
 
 export default function App() {
-  const loadEpisodes = useAppStore((s) => s.loadEpisodes)
+  const loadPodcasts = useAppStore((s) => s.loadPodcasts)
+  const loadEdition = useAppStore((s) => s.loadEdition)
   const transcribingEpisodeId  = useAppStore(s => s.transcribingEpisodeId)
   const transcriptionStartedAt = useAppStore(s => s.transcriptionStartedAt)
   const setTranscribingEpisode = useAppStore(s => s.setTranscribingEpisode)
@@ -24,8 +26,9 @@ export default function App() {
       setShowSetup(show)
       setSetupChecked(true)
     })
-    loadEpisodes()
-  }, [loadEpisodes])
+    loadPodcasts()
+    loadEdition()
+  }, [loadPodcasts, loadEdition])
 
   // Global transcription progress listener — survives all navigation
   useEffect(() => {
@@ -50,7 +53,7 @@ export default function App() {
   return (
     <div className="flex h-full bg-background overflow-hidden">
       {showSetup && (
-        <SetupWizard onComplete={() => setShowSetup(false)} />
+        <SetupWizard onComplete={() => { setShowSetup(false); loadPodcasts() }} />
       )}
       <Sidebar />
       <main className="flex-1 overflow-y-auto">
@@ -59,6 +62,7 @@ export default function App() {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/episode/:id" element={<EpisodeWorkspace />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/podcast/:podcastId/settings" element={<PodcastSettings />} />
         </Routes>
       </main>
     </div>

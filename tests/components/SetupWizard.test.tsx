@@ -10,6 +10,7 @@ const mockApi = {
   downloadWhisperModel: vi.fn(),
   setSetting: vi.fn(),
   markSetupComplete: vi.fn(),
+  createPodcast: vi.fn(),
 }
 
 // Assign to window.api before importing the component so the module captures it
@@ -81,9 +82,10 @@ describe('SetupWizard', () => {
     })
   })
 
-  it('calls onComplete after the final step', async () => {
+  it('calls onComplete after the final step, creating the first podcast along the way', async () => {
     mockApi.getWhisperStatus.mockResolvedValue(whisperReady)
     mockApi.markSetupComplete.mockResolvedValue({ success: true })
+    mockApi.createPodcast.mockResolvedValue({ id: 1, name: 'Meu Podcast', created_at: '' })
 
     const onComplete = vi.fn()
     render(<SetupWizard onComplete={onComplete} />)
@@ -95,14 +97,32 @@ describe('SetupWizard', () => {
     const continueBtn = screen.getByRole('button', { name: /Continuar/i })
     await userEvent.click(continueBtn)
 
+    // Now on the "name your first podcast" step
+    await waitFor(() => screen.getByText(/Seu primeiro podcast/i))
+    await userEvent.type(screen.getByPlaceholderText(/Talkeando Podcast/i), 'Meu Podcast')
+    await userEvent.click(screen.getByRole('button', { name: /Continuar/i }))
+
     // Now on done step
     await waitFor(() => screen.getByText(/Tudo pronto/i))
     await userEvent.click(screen.getByRole('button', { name: /Abrir o Studio/i }))
 
     await waitFor(() => {
+      expect(mockApi.createPodcast).toHaveBeenCalledWith('Meu Podcast')
       expect(mockApi.markSetupComplete).toHaveBeenCalled()
       expect(onComplete).toHaveBeenCalled()
     })
+  })
+
+  it('disables continuing past the podcast step until a name is entered', async () => {
+    mockApi.getWhisperStatus.mockResolvedValue(whisperReady)
+
+    render(<SetupWizard onComplete={vi.fn()} />)
+
+    await waitFor(() => screen.getByText(/Claude API Key/i))
+    await userEvent.click(screen.getByRole('button', { name: /Continuar/i }))
+
+    await waitFor(() => screen.getByText(/Seu primeiro podcast/i))
+    expect(screen.getByRole('button', { name: /Continuar/i })).toHaveProperty('disabled', true)
   })
 
   it('saves API key when provided before continuing', async () => {

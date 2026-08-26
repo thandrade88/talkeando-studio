@@ -17,6 +17,8 @@ Object.assign(window, { api: mockApi })
 
 const storeState = {
   episodes: [] as Episode[],
+  podcasts: [{ id: 1, name: 'Podcast de teste', created_at: new Date().toISOString() }] as Podcast[],
+  selectedPodcastId: 1 as number | null,
   isLoading: false,
   loadEpisodes: vi.fn(),
   addEpisode: vi.fn(),
@@ -39,6 +41,7 @@ import Dashboard from '../../src/pages/Dashboard'
 function makeEpisode(overrides: Partial<Episode> = {}): Episode {
   return {
     id: 1,
+    podcast_id: 1,
     title: 'Episódio de teste',
     file_path: '/tmp/ep.mp3',
     audio_path: '/tmp/ep.mp3',

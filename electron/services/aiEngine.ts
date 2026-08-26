@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { getDatabase } from './database'
+import { getPodcastSetting } from './podcastManager'
 
 export type AIProvider = 'claude' | 'openai' | 'gemini'
 
@@ -346,7 +347,7 @@ export function registerAIHandlers(ipcMain: IpcMain): void {
 
   ipcMain.handle('ai:generate', async (event, episodeId: number, type: string, opts?: { provider?: AIProvider }) => {
     const db = getDatabase()
-    const episode = db.prepare('SELECT * FROM episodes WHERE id = ?').get(episodeId) as { title: string } | undefined
+    const episode = db.prepare('SELECT * FROM episodes WHERE id = ?').get(episodeId) as { title: string; podcast_id: number } | undefined
     if (!episode) throw new Error('Episode not found')
 
     const transcript = getTranscriptText(episodeId)
@@ -366,16 +367,16 @@ export function registerAIHandlers(ipcMain: IpcMain): void {
 
     let prompt: string
     if (type === 'blog_post') {
-      const customTemplate = getSetting('blog_post_prompt')
+      const customTemplate = getPodcastSetting(episode.podcast_id, 'blog_post_prompt')
       const template = customTemplate || DEFAULT_BLOG_POST_PROMPT
       prompt = applyPromptTemplate(template, episode.title, transcript.substring(0, 12000))
     } else if (type === 'youtube') {
-      const customTemplate = getSetting('youtube_prompt')
+      const customTemplate = getPodcastSetting(episode.podcast_id, 'youtube_prompt')
       const template = customTemplate || DEFAULT_YOUTUBE_PROMPT
       const transcriptTs = getTranscriptSampledByMinute(episodeId)
       prompt = applyPromptTemplate(template, episode.title, transcriptTs)
     } else if (type === 'instagram') {
-      const customTemplate = getSetting('instagram_prompt')
+      const customTemplate = getPodcastSetting(episode.podcast_id, 'instagram_prompt')
       const template = customTemplate || DEFAULT_INSTAGRAM_PROMPT
       prompt = applyPromptTemplate(template, episode.title, transcript.substring(0, 8000))
     } else {
@@ -395,7 +396,7 @@ export function registerAIHandlers(ipcMain: IpcMain): void {
 
   ipcMain.handle('ai:generateResume', async (event, episodeId: number, opts?: { provider?: AIProvider }) => {
     const db = getDatabase()
-    const episode = db.prepare('SELECT * FROM episodes WHERE id = ?').get(episodeId) as { title: string } | undefined
+    const episode = db.prepare('SELECT * FROM episodes WHERE id = ?').get(episodeId) as { title: string; podcast_id: number } | undefined
     if (!episode) throw new Error('Episode not found')
 
     const segments = getTranscriptSegmentsRaw(episodeId)
@@ -418,7 +419,7 @@ export function registerAIHandlers(ipcMain: IpcMain): void {
       .map(s => `[${Math.round(s.start_time)}-${Math.round(s.end_time)}] ${s.text}`)
       .join('\n')
 
-    const customTemplate = getSetting('resume_prompt')
+    const customTemplate = getPodcastSetting(episode.podcast_id, 'resume_prompt')
     const template = customTemplate || DEFAULT_RESUME_PROMPT
     const prompt = applyPromptTemplate(template, episode.title, transcriptFormatted)
 

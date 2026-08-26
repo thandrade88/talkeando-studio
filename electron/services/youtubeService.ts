@@ -3,6 +3,7 @@ import { createServer } from 'http'
 import { google } from 'googleapis'
 import { createReadStream, statSync } from 'fs'
 import { getDatabase } from './database'
+import { getPodcastSetting, setPodcastSetting } from './podcastManager'
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -226,15 +227,15 @@ async function fetchChannelById(
 
 export function registerYouTubeHandlers(ipcMain: IpcMain): void {
 
-  ipcMain.handle('youtube:getStatus', () => {
+  ipcMain.handle('youtube:getStatus', (_event, podcastId?: number) => {
     const clientId  = getSetting('youtube_client_id')
     const connected = !!(getSetting('youtube_access_token') && getSetting('youtube_refresh_token'))
     return {
       clientId,
       connected,
       authChannelId: getSetting('youtube_auth_channel_id'),
-      mainChannelId: getSetting('youtube_main_channel_id'),
-      cutsChannelId: getSetting('youtube_cuts_channel_id'),
+      mainChannelId: podcastId ? getPodcastSetting(podcastId, 'youtube_main_channel_id') || null : null,
+      cutsChannelId: podcastId ? getPodcastSetting(podcastId, 'youtube_cuts_channel_id') || null : null,
     }
   })
 
@@ -278,13 +279,20 @@ export function registerYouTubeHandlers(ipcMain: IpcMain): void {
     setSetting('youtube_access_token',  '')
     setSetting('youtube_refresh_token', '')
     setSetting('youtube_token_expiry',  '')
-    for (const key of ['youtube_main_channel_id', 'youtube_cuts_channel_id', 'youtube_auth_channel_id']) {
-      const chId = getSetting(key)
-      if (chId) {
-        setSetting(`youtube_ch_${chId}_access`, '')
-        setSetting(`youtube_ch_${chId}_refresh`, '')
-        setSetting(`youtube_ch_${chId}_expiry`, '')
-      }
+
+    // Main/cuts channel selection is per-podcast now — sweep every podcast's
+    // configured channels so their cached tokens are invalidated too.
+    const configuredChannelIds = getDatabase().prepare(
+      "SELECT DISTINCT value FROM podcast_settings WHERE key IN ('youtube_main_channel_id', 'youtube_cuts_channel_id') AND value != ''"
+    ).all() as { value: string }[]
+    const authChId = getSetting('youtube_auth_channel_id')
+    const channelIds = new Set(configuredChannelIds.map(r => r.value))
+    if (authChId) channelIds.add(authChId)
+
+    for (const chId of channelIds) {
+      setSetting(`youtube_ch_${chId}_access`, '')
+      setSetting(`youtube_ch_${chId}_refresh`, '')
+      setSetting(`youtube_ch_${chId}_expiry`, '')
     }
     setSetting('youtube_auth_channel_id', '')
     return { success: true }
@@ -306,9 +314,9 @@ export function registerYouTubeHandlers(ipcMain: IpcMain): void {
     return ch
   })
 
-  ipcMain.handle('youtube:saveChannelConfig', (_event, mainChannelId: string, cutsChannelId: string) => {
-    setSetting('youtube_main_channel_id', mainChannelId)
-    setSetting('youtube_cuts_channel_id', cutsChannelId)
+  ipcMain.handle('youtube:saveChannelConfig', (_event, podcastId: number, mainChannelId: string, cutsChannelId: string) => {
+    setPodcastSetting(podcastId, 'youtube_main_channel_id', mainChannelId)
+    setPodcastSetting(podcastId, 'youtube_cuts_channel_id', cutsChannelId)
     return { success: true }
   })
 
@@ -430,13 +438,14 @@ export function registerYouTubeHandlers(ipcMain: IpcMain): void {
   })
 
   ipcMain.handle('youtube:updateVideoMetadata', async (_event, opts: {
+    podcastId: number
     videoId: string
     title: string
     description: string
     tags?: string[]
   }) => {
     const client = buildOAuth2Client()
-    const mainChId = getSetting('youtube_main_channel_id')
+    const mainChId = getPodcastSetting(opts.podcastId, 'youtube_main_channel_id')
     if (!((mainChId && loadChannelTokens(client, mainChId)) || loadTokens(client))) {
       throw new Error('Não autenticado no YouTube.')
     }

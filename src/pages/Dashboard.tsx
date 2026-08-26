@@ -16,7 +16,8 @@ const VIEW_STORAGE_KEY = 'talkeando_dashboard_view'
 
 export default function Dashboard() {
   const navigate = useNavigate()
-  const { episodes, isLoading, loadEpisodes, addEpisode, removeEpisode, selectEpisode, updateEpisode, transcribingEpisodeId } = useAppStore()
+  const { episodes, podcasts, selectedPodcastId, addEpisode, removeEpisode, selectEpisode, updateEpisode, transcribingEpisodeId } = useAppStore()
+  const podcast = podcasts.find(p => p.id === selectedPodcastId)
   const [importing, setImporting] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
   const [importStatus, setImportStatus] = useState<Record<number, string>>({})
@@ -40,11 +41,12 @@ export default function Dashboard() {
   }, [])
 
   async function handleImport() {
+    if (!selectedPodcastId) return
     const filePath = await window.api.openFileDialog()
     if (!filePath) return
     setImporting(true)
     try {
-      const episode = await window.api.importEpisode(filePath)
+      const episode = await window.api.importEpisode(filePath, selectedPodcastId)
       addEpisode(episode)
     } catch (err) {
       alert(`Erro ao importar: ${err}`)
@@ -66,10 +68,10 @@ export default function Dashboard() {
     e.preventDefault()
     setIsDragOver(false)
     const file = e.dataTransfer.files[0]
-    if (!file) return
+    if (!file || !selectedPodcastId) return
     setImporting(true)
     try {
-      const episode = await window.api.importEpisode(file.path)
+      const episode = await window.api.importEpisode(file.path, selectedPodcastId)
       addEpisode(episode)
     } catch (err) {
       alert(`Erro ao importar: ${err}`)
@@ -96,7 +98,7 @@ export default function Dashboard() {
     <div className="flex flex-col h-full">
       <header className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
         <div>
-          <h1 className="text-lg font-semibold">Episódios</h1>
+          <h1 className="text-lg font-semibold">{podcast?.name ?? 'Episódios'}</h1>
           <p className="text-xs text-muted-foreground">{episodes.length} episódio(s)</p>
         </div>
         <div className="flex items-center gap-3">
@@ -126,7 +128,7 @@ export default function Dashboard() {
           </div>
           <button
             onClick={handleImport}
-            disabled={importing}
+            disabled={importing || !selectedPodcastId}
             className="flex items-center gap-2 bg-primary hover:bg-primary/90 text-white text-sm px-4 py-2 rounded-md transition-colors disabled:opacity-50"
           >
             <Upload className="w-4 h-4" />

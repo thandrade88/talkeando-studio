@@ -2,10 +2,23 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
 const api = {
+  // App
+  getEdition: () => ipcRenderer.invoke('app:getEdition') as Promise<'solo' | 'studio'>,
+
+  // Podcasts
+  getPodcasts: () => ipcRenderer.invoke('podcasts:getAll'),
+  getPodcast: (id: number) => ipcRenderer.invoke('podcasts:getById', id),
+  createPodcast: (name: string) => ipcRenderer.invoke('podcasts:create', name),
+  updatePodcast: (id: number, data: { name?: string }) => ipcRenderer.invoke('podcasts:update', id, data),
+  deletePodcast: (id: number) => ipcRenderer.invoke('podcasts:delete', id),
+  getPodcastSettings: (podcastId: number) => ipcRenderer.invoke('podcasts:getSettings', podcastId),
+  setPodcastSetting: (podcastId: number, key: string, value: string) =>
+    ipcRenderer.invoke('podcasts:setSetting', podcastId, key, value),
+
   // Episodes
-  getEpisodes: () => ipcRenderer.invoke('episodes:getAll'),
+  getEpisodes: (podcastId?: number) => ipcRenderer.invoke('episodes:getAll', podcastId),
   getEpisode: (id: number) => ipcRenderer.invoke('episodes:getById', id),
-  importEpisode: (filePath: string) => ipcRenderer.invoke('episodes:import', filePath),
+  importEpisode: (filePath: string, podcastId: number) => ipcRenderer.invoke('episodes:import', filePath, podcastId),
   deleteEpisode: (id: number) => ipcRenderer.invoke('episodes:delete', id),
   updateEpisode: (id: number, data: Record<string, unknown>) =>
     ipcRenderer.invoke('episodes:update', id, data),
@@ -130,15 +143,15 @@ const api = {
   getAllSettings: () => ipcRenderer.invoke('settings:getAll'),
 
   // YouTube
-  getYouTubeStatus: () => ipcRenderer.invoke('youtube:getStatus'),
+  getYouTubeStatus: (podcastId?: number) => ipcRenderer.invoke('youtube:getStatus', podcastId),
   saveYouTubeCredentials: (clientId: string, clientSecret: string) =>
     ipcRenderer.invoke('youtube:saveCredentials', clientId, clientSecret),
   connectYouTube: () => ipcRenderer.invoke('youtube:connect'),
   disconnectYouTube: () => ipcRenderer.invoke('youtube:disconnect'),
   listYouTubeChannels: () => ipcRenderer.invoke('youtube:listChannels'),
   resolveYouTubeChannel: (channelId: string) => ipcRenderer.invoke('youtube:resolveChannel', channelId),
-  saveYouTubeChannelConfig: (mainChannelId: string, cutsChannelId: string) =>
-    ipcRenderer.invoke('youtube:saveChannelConfig', mainChannelId, cutsChannelId),
+  saveYouTubeChannelConfig: (podcastId: number, mainChannelId: string, cutsChannelId: string) =>
+    ipcRenderer.invoke('youtube:saveChannelConfig', podcastId, mainChannelId, cutsChannelId),
   connectForChannel: (channelId: string) =>
     ipcRenderer.invoke('youtube:connectForChannel', channelId),
   getChannelAuthStatus: (channelId: string) =>
@@ -150,7 +163,7 @@ const api = {
     thumbnailPath?: string; tags?: string[]; privacyStatus?: 'public' | 'unlisted' | 'private'
   }) => ipcRenderer.invoke('youtube:uploadVideo', opts),
   updateYouTubeVideoMetadata: (opts: {
-    videoId: string; title: string; description: string; tags?: string[]
+    podcastId: number; videoId: string; title: string; description: string; tags?: string[]
   }) => ipcRenderer.invoke('youtube:updateVideoMetadata', opts),
   onYouTubeUploadProgress: (cb: (pct: number) => void) => {
     const handler = (_: unknown, pct: number) => cb(pct)
@@ -164,27 +177,27 @@ const api = {
   },
 
   // WordPress
-  isWordPressConfigured: () => ipcRenderer.invoke('wordpress:isConfigured') as Promise<boolean>,
-  testWordPressConnection: (opts?: { url: string; user: string; appPassword: string }) =>
-    ipcRenderer.invoke('wordpress:testConnection', opts),
-  listWordPressPosts: (query?: string) =>
-    ipcRenderer.invoke('wordpress:listPosts', query),
-  getWordPressPost: (postId: number) =>
-    ipcRenderer.invoke('wordpress:getPost', postId),
+  isWordPressConfigured: (podcastId: number) => ipcRenderer.invoke('wordpress:isConfigured', podcastId) as Promise<boolean>,
+  testWordPressConnection: (podcastId: number, opts?: { url: string; user: string; appPassword: string }) =>
+    ipcRenderer.invoke('wordpress:testConnection', podcastId, opts),
+  listWordPressPosts: (podcastId: number, query?: string) =>
+    ipcRenderer.invoke('wordpress:listPosts', podcastId, query),
+  getWordPressPost: (podcastId: number, postId: number) =>
+    ipcRenderer.invoke('wordpress:getPost', podcastId, postId),
   linkWordPressPost: (episodeId: number, postId: number) =>
     ipcRenderer.invoke('wordpress:linkPost', episodeId, postId),
   unlinkWordPressPost: (episodeId: number) =>
     ipcRenderer.invoke('wordpress:unlinkPost', episodeId),
   publishToWordPress: (opts: {
     episodeId: number; title: string; content: string;
-    slug?: string; status?: 'draft' | 'publish'
+    slug?: string; status?: 'draft' | 'publish'; featuredImageUrl?: string
   }) => ipcRenderer.invoke('wordpress:publish', opts),
   updateWordPressPost: (opts: {
-    postId: number; title?: string; content?: string;
+    episodeId: number; postId: number; title?: string; content?: string;
     slug?: string; status?: 'draft' | 'publish'
   }) => ipcRenderer.invoke('wordpress:update', opts),
-  deleteWordPressPost: (postId: number) =>
-    ipcRenderer.invoke('wordpress:delete', postId),
+  deleteWordPressPost: (podcastId: number, postId: number) =>
+    ipcRenderer.invoke('wordpress:delete', podcastId, postId),
 }
 
 if (process.contextIsolated) {

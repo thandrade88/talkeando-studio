@@ -517,7 +517,7 @@ function ResumoTab({ episodeId, provider }: { episodeId: number; provider: Provi
   )
 }
 
-function ContentTab({ episodeId }: { episodeId: number }) {
+function ContentTab({ episodeId, episode }: { episodeId: number; episode: Episode }) {
   const navigate = useNavigate()
   const [contents, setContents]             = useState<GeneratedContent[]>([])
   const [contentType, setContentType]       = useState('resumo')
@@ -642,7 +642,7 @@ function ContentTab({ episodeId }: { episodeId: number }) {
       if (currentWpPostId !== wpPostId) setWpPostId(currentWpPostId)
       if (currentWpPostId) {
         // Update: only sync content — never overwrite title or slug
-        const r = await window.api.updateWordPressPost({ postId: currentWpPostId, content })
+        const r = await window.api.updateWordPressPost({ episodeId, postId: currentWpPostId, content })
         setWpResult(r.link)
         setWpSuccess('Conteúdo atualizado!')
         setTimeout(() => setWpSuccess(null), 3000)
@@ -669,6 +669,7 @@ function ContentTab({ episodeId }: { episodeId: number }) {
     setYtUpdating(true); setYtError(null); setYtUpdated(false)
     try {
       await window.api.updateYouTubeVideoMetadata({
+        podcastId: episode.podcast_id,
         videoId: ytVideoId,
         title:   '', // keep current title
         description: activeContent.content,
@@ -1122,12 +1123,12 @@ function ClipsTab({ episodeId, episode }: { episodeId: number; episode: Episode 
   useEffect(() => window.api.onClipProgress(p => setExportProgress(p)), [])
 
   useEffect(() => {
-    window.api.getYouTubeStatus().then(s => {
+    window.api.getYouTubeStatus(episode.podcast_id).then(s => {
       setYtConnected(s.connected)
       if (s.cutsChannelId) setYtCutsChId(s.cutsChannelId)
     })
     return window.api.onYouTubeUploadProgress(pct => setUploadPct(pct))
-  }, [])
+  }, [episode.podcast_id])
 
   useEffect(() => {
     window.api.isOpusClipConfigured().then(setOpusConfigured)
@@ -1808,8 +1809,8 @@ export default function EpisodeWorkspace() {
   }, [episodeId])
 
   useEffect(() => {
-    if (!episodeId) return
-    window.api.getYouTubeStatus().then(async s => {
+    if (!episodeId || !episode) return
+    window.api.getYouTubeStatus(episode.podcast_id).then(async s => {
       setYtConnected(s.connected)
       if (s.mainChannelId) setYtMainChId(s.mainChannelId)
       if (!s.connected || !s.mainChannelId) return
@@ -1833,21 +1834,21 @@ export default function EpisodeWorkspace() {
       } catch {}
       finally { setYtLoading(false) }
     })
-  }, [episodeId])
+  }, [episodeId, episode])
 
   // WordPress: load connection + linked post
   useEffect(() => {
-    if (!episodeId) return
-    window.api.isWordPressConfigured().then(async configured => {
+    if (!episodeId || !episode) return
+    window.api.isWordPressConfigured(episode.podcast_id).then(async configured => {
       if (!configured) return
       try {
-        await window.api.testWordPressConnection()
+        await window.api.testWordPressConnection(episode.podcast_id)
         setWpConnected(true)
         const savedId = await window.api.getSetting(`episode_${episodeId}_wp_post_id`)
         if (savedId) {
           setWpPostId(Number(savedId))
           try {
-            const post = await window.api.getWordPressPost(Number(savedId))
+            const post = await window.api.getWordPressPost(episode.podcast_id, Number(savedId))
             setWpSelectedPost(post)
           } catch {
             setWpSelectedPost({ postId: Number(savedId), title: `Post #${savedId}`, content: '', excerpt: '', modifiedAt: '', link: '', status: 'draft', slug: '' })
@@ -1855,24 +1856,24 @@ export default function EpisodeWorkspace() {
         }
       } catch { setWpConnected(false) }
     })
-  }, [episodeId])
+  }, [episodeId, episode])
 
   // WordPress: debounced search
   useEffect(() => {
-    if (!wpConnected) return
+    if (!wpConnected || !episode) return
     clearTimeout(wpDebounceRef.current)
     if (!wpSearch.trim()) {
       setWpSearching(true)
-      window.api.listWordPressPosts().then(setWpPosts).catch(() => {}).finally(() => setWpSearching(false))
+      window.api.listWordPressPosts(episode.podcast_id).then(setWpPosts).catch(() => {}).finally(() => setWpSearching(false))
       return
     }
     setWpSearching(true)
     wpDebounceRef.current = setTimeout(() => {
-      window.api.listWordPressPosts(wpSearch.trim())
+      window.api.listWordPressPosts(episode.podcast_id, wpSearch.trim())
         .then(setWpPosts).catch(() => {}).finally(() => setWpSearching(false))
     }, 400)
     return () => clearTimeout(wpDebounceRef.current)
-  }, [wpSearch, wpConnected])
+  }, [wpSearch, wpConnected, episode])
 
   useEffect(() => {
     if (!ytMainChId) return
@@ -2185,7 +2186,7 @@ export default function EpisodeWorkspace() {
           onResetProgress={() => useAppStore.getState().setTxProgress(0, '', null)}
         />
       )}
-      {tab === 'conteudo'    && <ContentTab       episodeId={episodeId} />}
+      {tab === 'conteudo'    && <ContentTab       episodeId={episodeId} episode={episode} />}
       {tab === 'clips'       && <ClipsTab         episodeId={episodeId} episode={episode} />}
     </div>
   )

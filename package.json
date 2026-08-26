@@ -1,14 +1,17 @@
 {
   "name": "talkeando-studio",
-  "version": "0.1.0",
+  "version": "2.0.0",
   "description": "Content Operating System for Talkeando Podcast",
   "main": "dist-electron/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "build:solo": "EDITION=solo electron-vite build",
     "preview": "electron-vite preview",
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "npm run build && electron-builder --mac",
+    "build:solo:win": "npm run build:solo && electron-builder --win --config.appId=com.talkeando.studio.solo --config.productName=\"Talkeando Studio Solo\"",
+    "build:solo:mac": "npm run build:solo && electron-builder --mac --config.appId=com.talkeando.studio.solo --config.productName=\"Talkeando Studio Solo\"",
     "typecheck": "tsc --noEmit",
     "postinstall": "electron-rebuild -f -w better-sqlite3",
     "test": "vitest run",
